@@ -1,1 +1,5 @@
 /target
+/config/*
+!/config/template.yaml
+!/config/template.yml
+!/config/template.env
