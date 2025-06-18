@@ -37,13 +37,24 @@ impl App {
     /// Run the application's main loop.
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         while self.running {
+            // Clear the terminal and draw the current state of the application.
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+
+            // Wait for the next event.
+            // This will block until an event is received.
+            // If you want to handle events in a non-blocking way, you can use `tokio::select!`
+            // or `tokio::time::timeout` to wait for a specific duration.
             match self.events.next().await? {
+                // Handle tick events.
                 Event::Tick => self.tick(),
+
+                // Handle crossterm events.
                 Event::Crossterm(event) => match event {
                     crossterm::event::Event::Key(key_event) => self.handle_key_events(key_event)?,
                     _ => {}
                 },
+
+                // Handle application events.
                 Event::App(app_event) => match app_event {
                     AppEvent::Increment => self.increment_counter(),
                     AppEvent::Decrement => self.decrement_counter(),
@@ -57,12 +68,18 @@ impl App {
     /// Handles the key events and updates the state of [`App`].
     pub fn handle_key_events(&mut self, key_event: KeyEvent) -> color_eyre::Result<()> {
         match key_event.code {
+            // Emit quit events.
             KeyCode::Esc | KeyCode::Char('q') => self.events.send(AppEvent::Quit),
+
+            // Emit quit events with Ctrl+C.
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.events.send(AppEvent::Quit)
             }
+
+            // Increment and decrement the counter.
             KeyCode::Right => self.events.send(AppEvent::Increment),
             KeyCode::Left => self.events.send(AppEvent::Decrement),
+
             // Other handlers you could add here.
             _ => {}
         }
