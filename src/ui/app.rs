@@ -10,8 +10,10 @@ use ratatui::{
 pub struct App {
     /// Is the application running?
     pub running: bool,
+
     /// Counter.
     pub counter: u8,
+
     /// Event handler.
     pub events: EventHandler,
 }
