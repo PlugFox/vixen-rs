@@ -1,0 +1,188 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "docker:build",
+            "detail": "Build server using Docker.",
+            "icon": {
+                "color": "terminal.ansiBlue",
+                "id": "azure"
+            },
+            "type": "shell",
+            "command": "docker",
+            "options": {
+                "cwd": "${workspaceFolder}/docker",
+                "env": {}
+            },
+            "osx": {
+                "args": [
+                    "buildx",
+                    "build",
+                    "--platform=linux/arm64",
+                    "--build-arg=UBUNTU_VERSION=24.04",
+                    "--build-arg=BUILD_DATE=$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")",
+                    "--build-arg=VCS_REF=$(git rev-parse HEAD)",
+                    "--build-arg=VCS_URL=$(git config --get remote.origin.url)",
+                    "--tag=plugfox/vixen-rs:local",
+                    "--file=tools/docker/Dockerfile",
+                    "."
+                ]
+            },
+            "windows": {
+                "args": [
+                    "buildx",
+                    "build",
+                    "--platform=linux/amd64",
+                    "--build-arg=UBUNTU_VERSION=24.04",
+                    "--build-arg=BUILD_DATE=$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")",
+                    "--build-arg=VCS_REF=$(git rev-parse HEAD)",
+                    "--build-arg=VCS_URL=$(git config --get remote.origin.url)",
+                    "--tag=plugfox/vixen-rs:local",
+                    "--file=tools/docker/Dockerfile",
+                    "."
+                ]
+            },
+            "linux": {
+                "args": [
+                    "buildx",
+                    "build",
+                    "--platform=linux/amd64,linux/arm64",
+                    "--build-arg=UBUNTU_VERSION=24.04",
+                    "--build-arg=BUILD_DATE=$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")",
+                    "--build-arg=VCS_REF=$(git rev-parse HEAD)",
+                    "--build-arg=VCS_URL=$(git config --get remote.origin.url)",
+                    "--tag=plugfox/vixen-rs:local",
+                    "--file=tools/docker/Dockerfile",
+                    "."
+                ]
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "docker:compose:up",
+            "detail": "Start Docker services",
+            "icon": {
+                "color": "terminal.ansiGreen",
+                "id": "cloud"
+            },
+            "type": "shell",
+            "command": [
+                "docker compose --env-file=.env --file='docker-compose.yml' --profile=server --project-name='vixen' up -d"
+            ],
+            "args": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "options": {
+                "cwd": "${workspaceFolder}/tools/docker"
+            },
+            "isBackground": false,
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true,
+                "group": "docker"
+            }
+        },
+        {
+            "label": "docker:compose:down",
+            "detail": "Stop Docker services",
+            "icon": {
+                "color": "terminal.ansiRed",
+                "id": "cloud"
+            },
+            "type": "shell",
+            "command": [
+                "docker compose --project-name=vixen --profile=server down"
+            ],
+            "args": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "options": {
+                "cwd": "${workspaceFolder}/tools/docker"
+            },
+            "isBackground": false,
+            "presentation": {
+                "reveal": "never",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": false,
+                "group": "docker"
+            }
+        },
+        {
+            "label": "cargo:lint",
+            "detail": "Lint Rust using cargo clippy.",
+            "type": "shell",
+            "command": "cargo clippy",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "cargo:format",
+            "detail": "Format Rust using cargo fmt.",
+            "type": "shell",
+            "command": "cargo fmt",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "none",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo:test",
+            "detail": "Run tests for Rust using cargo test.",
+            "type": "shell",
+            "command": "cargo test",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "cargo:build",
+            "detail": "Build Rust using cargo build.",
+            "type": "shell",
+            "command": "cargo build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        }
+    ]
+}

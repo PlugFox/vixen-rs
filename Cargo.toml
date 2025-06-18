@@ -1,0 +1,27 @@
+[package]
+name = "vixen"
+version = "0.1.0"
+description = "Telegram bot for automatically banning spammers in Telegram chats"
+authors = ["Mike Matiunin <plugfox@gmail.com>"]
+license = "MIT"
+edition = "2024"
+
+[[bin]]
+name = "server"
+path = "bin/server.rs"
+
+# cargo run --release
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[dependencies]
+crossterm = { version = "0.28.1", features = ["event-stream"] }
+futures = "0.3.31"
+ratatui = "0.29.0"
+tokio = { version = "1.40.0", features = ["full"] }
+color-eyre = "0.6.3"
+serde = { version = "1.0", features = ["derive"] }

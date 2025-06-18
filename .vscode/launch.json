@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "[Terminal] Server (debug)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=server",
+                    "--package=vixen"
+                ],
+                "filter": {
+                    "name": "server",
+                    "kind": "bin"
+                },
+                "cwd": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "cwd": "${workspaceFolder}",
+            /* "envFile": "${workspaceFolder}/config/local.env", */
+            "args": []
+        }
+    ]
+}

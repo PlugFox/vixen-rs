@@ -1,0 +1,23 @@
+{
+    "editor.rulers": [
+        120
+    ],
+    "search.exclude": {
+        "coverage": true,
+        "build": true,
+        "target": true
+    },
+    // Remove from file watching
+    "files.watcherExclude": {
+        "coverage": true,
+        "build": true,
+        "target": true
+    },
+    // Causes the debug view to automatically appear when a breakpoint is hit. This
+    // setting is global and not configurable per-language.
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.patterns": {
+        ".gitignore": ".gitattributes, .gitmodules, .gitmessage, .mailmap, .git-blame*",
+        "readme.*": "authors, backers.md, changelog*, citation*, code_of_conduct.md, codeowners, contributing.md, contributing_*.md, contributors, copying, credits, governance.md, history.md, license*, maintainers, readme*, security.md, sponsors.md, how_to.md, howto.md"
+    }
+}
