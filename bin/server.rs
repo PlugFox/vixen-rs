@@ -9,7 +9,7 @@ use tracing_appender::rolling;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments - this will automatically handle --help
     let config = Config::parse();
-    init_tracing(&config);
+    init_logging(&config);
 
     info!("Starting Telegram Bot Server...");
     debug!("Configuration:");
@@ -79,7 +79,7 @@ pub struct Config {
     log_level: String,
 }
 
-fn init_tracing(config: &Config) {
+fn init_logging(config: &Config) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     /* let env_filter = EnvFilter::try_from_env("APP_LOG")
         .or_else(|_| EnvFilter::try_from_default_env())
