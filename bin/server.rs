@@ -12,10 +12,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing(&config.log_level);
 
     info!("Starting Telegram Bot Server...");
-    info!("Configuration:");
-    info!("  Address: {}", config.address);
-    info!("  Port: {}", config.port);
-    info!("  Log Level: {}", config.log_level);
+    debug!("Configuration:");
+    debug!("  Address: {}", config.address);
+    debug!("  Port: {}", config.port);
+    debug!("  Log Level: {}", config.log_level);
 
     // TODO: Implement actual server logic here
     info!("Server would start at {}:{}", config.address, config.port);
