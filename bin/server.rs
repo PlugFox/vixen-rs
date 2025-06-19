@@ -31,7 +31,8 @@ pub struct Config {
     #[arg(
         short = 'a',
         long,
-        default_value = "127.0.0.1",
+        env = "ADDRESS",
+        default_value = "0.0.0.0",
         aliases = ["host", "addr"],
         help = "IP address to bind the server to"
     )]
@@ -41,15 +42,18 @@ pub struct Config {
     #[arg(
         short = 'p',
         long = "port",
+        env = "PORT",
         default_value_t = 8080,
         help = "Port number to bind the server to"
     )]
     port: u16,
 
     /// Level of logging (CLI > ENV > default)
+    /// This can be set to trace, debug, info, warn, or error
     #[arg(
         short = 'l',
         long = "logs",
+        env = "LOGS",
         default_value = "info",
         aliases = ["log", "level", "verbose"],
         help = "Logging level (trace, debug, info, warn, error)"
