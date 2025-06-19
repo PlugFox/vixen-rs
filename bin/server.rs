@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("  Log Level: {}", config.log_level);
 
     // Start the HTTP server
-    let mut http_shutdown_rx = shutdown_tx.subscribe();
+    let http_shutdown_rx = shutdown_tx.subscribe();
     let http_shutdown_tx = shutdown_tx.clone();
     let http_handle = spawn(async move {
         if let Err(e) = http_server(http_shutdown_rx).await {
@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Start the bot polling
-    let mut bot_shutdown_rx = shutdown_tx.subscribe();
+    let bot_shutdown_rx = shutdown_tx.subscribe();
     let bot_shutdown_tx = shutdown_tx.clone();
     let bot_handle = spawn(async move {
         if let Err(e) = bot_polling(bot_shutdown_rx).await {
@@ -50,6 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for shutdown signal (Ctrl+C)
     signal::ctrl_c().await?;
+
+    // let _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
     let _ = shutdown_tx.send(());
 
     let _ = http_handle.await;
