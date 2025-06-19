@@ -1,4 +1,7 @@
-/target
+target/
+
+logs/
+
 /config/*
 !/config/template.yaml
 !/config/template.yml
