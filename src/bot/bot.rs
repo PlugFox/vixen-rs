@@ -1,21 +1,148 @@
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json;
 use sqlx::SqlitePool;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+use crate::config;
+
+#[derive(Debug, Deserialize)]
+struct User {
+    // Unique identifier for this user or bot
+    id: i64,
+    // True, if this user is a bot
+    is_bot: bool,
+    // User's or bot's first name
+    first_name: String,
+    // Optional. User's or bot's last name
+    last_name: Option<String>,
+    // Optional. User's or bot's username
+    username: Option<String>,
+    // Optional. IETF language tag of the user's language
+    language_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ChatType {
+    #[serde(rename = "private")]
+    Private,
+    #[serde(rename = "group")]
+    Group,
+    #[serde(rename = "supergroup")]
+    Supergroup,
+    #[serde(rename = "channel")]
+    Channel,
+}
+
+#[derive(Debug, Deserialize)]
+struct Chat {
+    // Unique identifier for this chat
+    id: i64,
+
+    // Type of the chat, can be either “private”, “group”, “supergroup” or “channel”
+    #[serde(rename = "type")]
+    chat_type: ChatType,
+
+    // Optional. Title, for supergroups, channels and group chats
+    title: Option<String>,
+
+    // Optional. Username, for private chats, supergroups and channels if available
+    username: Option<String>,
+
+    // Optional. First name of the other party in a private chat
+    first_name: Option<String>,
+
+    // Optional. Last name of the other party in a private chat
+    last_name: Option<String>,
+
+    // Optional. True, if the supergroup chat is a forum (has topics enabled)
+    is_forum: Option<bool>, // Optional. True, if the supergroup chat is a forum (has topics enabled)
+}
+
 #[derive(Debug, Deserialize)]
 struct Message {
+    // Unique message identifier inside this chat
     message_id: i64,
+
+    // Date the message was sent in Unix time
+    // It is always a positive number, representing a valid date
+    date: u64,
+
+    // Chat the message belongs to
+    chat: Chat,
+
+    // Optional. Sender of the message; may be empty for messages sent to channels
+    from: Option<User>,
+
+    // Optional. For text messages, the actual UTF-8 text of the message
     text: Option<String>,
-    // добавьте другие поля по необходимости
+
+    // Optional. For text messages, special entities like usernames, URLs, bot commands, etc. that appear in the text
+    #[serde(default)]
+    entities: Option<Vec<serde_json::Value>>,
+
+    // Optional. Message is a forwarded story
+    #[serde(default)]
+    story: Option<()>,
+
+    // 	Optional. Message is a video, information about the video
+    #[serde(default)]
+    video: Option<()>,
+
+    // Optional. Message is an animation, information about the animation
+    // For backward compatibility, when this field is set, the document field will also be set
+    #[serde(default)]
+    animation: Option<()>,
+
+    // Optional. Message is an audio file, information about the file
+    #[serde(default)]
+    audio: Option<()>,
+
+    // Optional. Message is a general file, information about the file
+    #[serde(default)]
+    document: Option<()>,
+
+    // Optional. Message is a photo, available sizes of the photo
+    #[serde(default)]
+    photo: Option<()>,
+
+    // Optional. Message is a sticker, information about the sticker
+    #[serde(default)]
+    sticker: Option<()>,
+
+    // Optional. Message is a contact, information about the contact
+    #[serde(default)]
+    video_note: Option<()>,
+
+    // Optional. Message is a voice message, information about the voice message
+    #[serde(default)]
+    voice: Option<()>,
+
+    // Optional. Message is a game, information about the game.
+    #[serde(default)]
+    game: Option<()>,
+
+    // Optional. Caption for the animation, audio, document, paid media, photo, video or voice
+    caption: Option<String>,
+
+    // Optional. For messages with a caption,
+    // special entities like usernames, URLs, bot commands, etc. that appear in the caption
+    caption_entities: Option<Vec<serde_json::Value>>,
+}
+
+struct CallbackQuery {
+    id: String,
+    from: User,
+    message: Option<Message>,
+    data: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Update {
     update_id: i64,
     message: Option<Message>,
-    // добавьте другие типы обновлений (callback_query, etc.)
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,7 +152,7 @@ struct GetUpdates {
 }
 
 /// Long-poll Telegram updates, stop on shutdown signal
-pub async fn poll<F>(token: String, chats: Vec<String>, pool: SqlitePool, shutdown_signal: F)
+pub async fn poll<F>(conf: &config::Config, pool: SqlitePool, shutdown_signal: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
@@ -34,8 +161,9 @@ where
         .build()
         .expect("failed to build HTTP client");
 
-    let mut offset = 0;
+    let mut offset: i64 = 0;
     info!("Starting Telegram polling");
+    let token: &str = &conf.telegram;
 
     tokio::pin!(shutdown_signal);
 
@@ -45,14 +173,20 @@ where
                 info!("Telegram polling stopped");
                 break;
             }
-            result = get_updates(&client, &token, offset) => {
+            result = get_updates(
+                &client, // HTTP client for Telegram API
+                token, // Telegram Bot API token
+                offset, // offset for updates
+                30, // timeout in seconds
+                100, // limit of updates to fetch
+                vec!["message", "callback_query"]
+            ) => {
                 match result {
                     Ok(updates) => {
                         for upd in updates {
                             offset = upd.update_id + 1;
                             info!("received update: {:?}", upd);
-
-                            // TODO: обработка обновления и сохранение в БД
+                            // Process each update
                             if let Some(message) = upd.message {
                                 process_message(message, &pool).await;
                             }
@@ -60,7 +194,7 @@ where
                     }
                     Err(err) => {
                         error!(%err, "error polling Telegram");
-                        // Небольшая задержка при ошибке, чтобы не спамить API
+                        // A bit of backoff to avoid hammering the API
                         tokio::time::sleep(Duration::from_secs(5)).await;
                     }
                 }
@@ -73,10 +207,13 @@ async fn get_updates(
     client: &Client,
     token: &str,
     offset: i64,
+    timeout: u32,
+    limit: u32,
+    allowed_updates: Vec<&str>,
 ) -> Result<Vec<Update>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!(
-        "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=30&limit=100",
-        token, offset
+        "https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout={timeout}&limit={limit}&allowed_updates={filter}",
+        filter = allowed_updates.join(",")
     );
 
     let resp = client.get(&url).send().await?;

@@ -28,5 +28,13 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool> {
         .max_connections(5)
         .connect(database_url)
         .await?;
+
+    // VACUUM the database to optimize it
+    debug!("Running VACUUM on the database to optimize it");
+    sqlx::query("VACUUM").execute(&pool).await.map_err(|e| {
+        error!("Failed to VACUUM the database: {}", e);
+        e
+    })?;
+
     Ok(pool)
 }

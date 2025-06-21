@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = tg_rx.await;
     };
     let tg_handle = tokio::spawn(async move {
-        bot::poll(token, chats, tg_pool, tg_shutdown).await;
+        bot::poll(&config, tg_pool, tg_shutdown).await;
     });
 
     // Wait for shutdown signal (Ctrl+C)
