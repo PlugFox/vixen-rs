@@ -48,14 +48,14 @@ pub struct Config {
     pub address: String,
 
     /// SQLite connection URL (CLI > ENV > default)
-    /// e.g. sqlite::memory: or sqlite://vixen.db
+    /// e.g. sqlite::memory: or sqlite://data/vixen.db?mode=rwc
     #[arg(
         short = 'd',
         long,
         env = "CONFIG_DATABASE",
         aliases = ["db", "sqlite", "sqlite3", "sql", "storage"],
-        default_value = "sqlite://data/vixen.db",
-        help = "SQLite connection URL (e.g. sqlite://vixen.db or sqlite:data/vixen.db?mode=rwc)"
+        default_value = "sqlite://data/vixen.db?mode=rwc",
+        help = "SQLite connection URL (e.g. sqlite://vixen.db or sqlite://data/vixen.db?mode=rwc)"
     )]
     pub database: String,
 
