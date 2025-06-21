@@ -2,9 +2,8 @@ use clap::Parser;
 
 use tracing::{debug, info /* trace, warn, error */};
 //use tracing_log::log;
-use std::error::Error;
 use std::sync::Arc;
-use tokio::{select, sync::broadcast, sync::oneshot};
+use tokio::sync::oneshot;
 use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -128,32 +127,4 @@ fn init_logging(config: &config::Config) {
         .with(console_layer)
         .with(file_layer)
         .init();
-}
-
-/// Start the HTTP server
-async fn http_server(shutdown: broadcast::Receiver<()>) -> Result<(), Box<dyn Error>> {
-    // Здесь запускаете ваш HTTP-сервер, например с hyper или axum:
-    // server.with_graceful_shutdown(async {
-    //     let _ = shutdown.recv().await;
-    // }).await?;
-    Ok(())
-}
-
-/// Start the bot polling loop
-async fn bot_polling(mut shutdown: broadcast::Receiver<()>) -> Result<(), Box<dyn Error>> {
-    loop {
-        select! {
-            _ = shutdown.recv() => {
-                // получили сигнал завершения
-                break;
-            }
-            result = async {
-                // Ваш polling: обращение к Telegram API, работа с БД и т.д.
-            } => {
-                // обработка результата polling
-                let _ = result;
-            }
-        }
-    }
-    Ok(())
 }

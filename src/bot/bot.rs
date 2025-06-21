@@ -1,9 +1,10 @@
+use core::fmt;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json;
 use sqlx::SqlitePool;
-use std::time::Duration;
-use tracing::{error, info, warn};
+use std::{collections::HashSet, ops::Add, time::Duration};
+use tracing::{debug, error, info, warn};
 
 use crate::config;
 
@@ -23,7 +24,7 @@ struct User {
     language_code: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum ChatType {
     #[serde(rename = "private")]
@@ -85,44 +86,44 @@ struct Message {
 
     // Optional. Message is a forwarded story
     #[serde(default)]
-    story: Option<()>,
+    story: Option<serde_json::Value>,
 
     // 	Optional. Message is a video, information about the video
     #[serde(default)]
-    video: Option<()>,
+    video: Option<serde_json::Value>,
 
     // Optional. Message is an animation, information about the animation
     // For backward compatibility, when this field is set, the document field will also be set
     #[serde(default)]
-    animation: Option<()>,
+    animation: Option<serde_json::Value>,
 
     // Optional. Message is an audio file, information about the file
     #[serde(default)]
-    audio: Option<()>,
+    audio: Option<serde_json::Value>,
 
     // Optional. Message is a general file, information about the file
     #[serde(default)]
-    document: Option<()>,
+    document: Option<serde_json::Value>,
 
     // Optional. Message is a photo, available sizes of the photo
     #[serde(default)]
-    photo: Option<()>,
+    photo: Option<serde_json::Value>,
 
     // Optional. Message is a sticker, information about the sticker
     #[serde(default)]
-    sticker: Option<()>,
+    sticker: Option<serde_json::Value>,
 
     // Optional. Message is a contact, information about the contact
     #[serde(default)]
-    video_note: Option<()>,
+    video_note: Option<serde_json::Value>,
 
     // Optional. Message is a voice message, information about the voice message
     #[serde(default)]
-    voice: Option<()>,
+    voice: Option<serde_json::Value>,
 
     // Optional. Message is a game, information about the game.
     #[serde(default)]
-    game: Option<()>,
+    game: Option<serde_json::Value>,
 
     // Optional. Caption for the animation, audio, document, paid media, photo, video or voice
     caption: Option<String>,
@@ -145,6 +146,20 @@ struct Update {
     message: Option<Message>,
 }
 
+impl fmt::Display for Update {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref message) = self.message {
+            write!(
+                f,
+                "Update#{}: Message from chat#{}",
+                self.update_id, message.chat.id
+            )
+        } else {
+            write!(f, "Update#{}: Other", self.update_id)
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct GetUpdates {
     ok: bool,
@@ -156,28 +171,36 @@ pub async fn poll<F>(conf: &config::Config, pool: SqlitePool, shutdown_signal: F
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
+    let timeout = Duration::from_secs(30); // Default timeout for HTTP requests
     let client = Client::builder()
-        .timeout(Duration::from_secs(35)) // немного больше чем timeout в API
+        .timeout(timeout.add(Duration::from_secs(5))) // A bit longer timeout for Telegram API requests
         .build()
         .expect("failed to build HTTP client");
 
     let mut offset: i64 = 0;
-    info!("Starting Telegram polling");
+    info!("starting Telegram polling");
     let token: &str = &conf.telegram;
+    let chats: HashSet<i64> = conf
+        .chats
+        .iter()
+        .map(|chat| chat.parse::<i64>().unwrap_or(0))
+        .filter(|&id| id != 0) // Filter out invalid chat IDs
+        .collect(); // Collect chat IDs from configuration
+    let has_chats = !chats.is_empty();
 
     tokio::pin!(shutdown_signal);
 
     loop {
         tokio::select! {
             _ = &mut shutdown_signal => {
-                info!("Telegram polling stopped");
+                info!("telegram polling stopped");
                 break;
             }
             result = get_updates(
                 &client, // HTTP client for Telegram API
                 token, // Telegram Bot API token
                 offset, // offset for updates
-                30, // timeout in seconds
+                timeout.as_secs(), // timeout in seconds
                 100, // limit of updates to fetch
                 vec!["message", "callback_query"]
             ) => {
@@ -185,15 +208,24 @@ where
                     Ok(updates) => {
                         for upd in updates {
                             offset = upd.update_id + 1;
-                            info!("received update: {:?}", upd);
-                            // Process each update
+                            info!("received update: {}", upd);
+                            // Process each update from Telegram Bot API
                             if let Some(message) = upd.message {
+                                if message.chat.chat_type == ChatType::Private {
+                                    debug!("ignoring private message from chat#{}", message.chat.id);
+                                    continue; // Skip private messages
+                                } else if has_chats && !chats.contains(&message.chat.id) {
+                                    debug!("ignoring message from chat#{}", message.chat.id);
+                                    continue; // Skip messages from non-configured chats
+                                }
+
+                                info!("processing message from chat#{}", message.chat.id);
                                 process_message(message, &pool).await;
                             }
                         }
                     }
                     Err(err) => {
-                        error!(%err, "error polling Telegram");
+                        error!(%err, "error polling Telegram ");
                         // A bit of backoff to avoid hammering the API
                         tokio::time::sleep(Duration::from_secs(5)).await;
                     }
@@ -207,12 +239,24 @@ async fn get_updates(
     client: &Client,
     token: &str,
     offset: i64,
-    timeout: u32,
-    limit: u32,
+    timeout: u64,
+    limit: u8,
     allowed_updates: Vec<&str>,
 ) -> Result<Vec<Update>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!(
-        "https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout={timeout}&limit={limit}&allowed_updates={filter}",
+        concat!(
+            "https://api.telegram.org",
+            "/bot{token}",
+            "/getUpdates",
+            "?offset={offset}",
+            "&timeout={timeout}",
+            "&limit={limit}",
+            "&allowed_updates={filter}"
+        ),
+        token = token,
+        offset = offset,
+        timeout = timeout,
+        limit = limit,
         filter = allowed_updates.join(",")
     );
 
