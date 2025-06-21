@@ -32,7 +32,7 @@ anyhow = "1.0.98"
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-native-tls"] }
 
 # HTTP client
-reqwest = "0.12.20"
+reqwest = {version = "0.12.20", features = ["json"]}
 
 # HTTP server
 axum = "0.8.4"

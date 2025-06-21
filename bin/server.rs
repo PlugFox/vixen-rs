@@ -3,11 +3,14 @@ use clap::Parser;
 use tracing::{debug, info /* trace, warn, error */};
 //use tracing_log::log;
 use std::error::Error;
-use tokio::{select, signal, spawn, sync::broadcast};
+use tokio::{select, signal, spawn, sync::broadcast, sync::oneshot};
 use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-use vixen::config::Config;
+use vixen::api;
+use vixen::bot;
+use vixen::config;
+use vixen::db;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
     // Parse command line arguments - this will automatically handle --help
-    let config = Config::parse();
+    let config = config::Config::parse();
     init_logging(&config);
 
     info!("Starting Telegram Bot Server...");
@@ -26,6 +29,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     debug!("  Address: {}", config.address);
     debug!("  Log Level: {}", config.log_level);
+
+    // initialize database pool
+    let pool = db::init_db(&config.database).await?;
+
+    // channels for graceful shutdowns
+    let (api_tx, api_rx) = oneshot::channel::<()>();
+    let (tg_tx, tg_rx) = oneshot::channel::<()>();
+
+    // spawn API service
+    let api_pool = pool.clone();
+    let api_addr: std::net::SocketAddr = config.address.parse().expect("Invalid address format");
+    let api_shutdown = async {
+        let _ = api_rx.await;
+    };
+    let api_handle = tokio::spawn(async move {
+        api::start(api_addr, api_pool, api_shutdown).await;
+    });
+
+    // spawn Telegram polling service
+    let tg_pool = pool.clone();
+    let token = config.telegram.clone();
+    let tg_shutdown = async {
+        let _ = tg_rx.await;
+    };
+    let tg_handle = tokio::spawn(async move {
+        bot::poll(token, tg_pool, tg_shutdown).await;
+    });
 
     // Start the HTTP server
     /* let http_shutdown_rx = shutdown_tx.subscribe();
@@ -62,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn init_logging(config: &Config) {
+fn init_logging(config: &config::Config) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     /* let env_filter = EnvFilter::try_from_env("APP_LOG")
     .or_else(|_| EnvFilter::try_from_default_env())
