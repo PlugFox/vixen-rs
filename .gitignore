@@ -11,3 +11,4 @@ logs/
 *.sqlite
 *.sqlite3
 *.log
+*.webp

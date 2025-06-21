@@ -6,9 +6,19 @@ authors = ["Mike Matiunin <plugfox@gmail.com>"]
 license = "MIT"
 edition = "2024"
 
+# Start server and telegram bot,
+# this is the main entry point of the application.
+# cargo run --release --bin server
 [[bin]]
 name = "server"
 path = "bin/server.rs"
+
+# Try to generate WebP image with captcha.
+# This is used for testing purposes.
+# cargo run --release --bin captcha
+[[bin]]
+name = "captcha"
+path = "bin/captcha.rs"
 
 # cargo run --release
 [profile.release]
@@ -24,23 +34,27 @@ strip = true
 futures = "0.3.31"
 tokio = { version = "1.45.1", features = ["full"] }
 
-
 # Utilities
 anyhow = "1.0.98"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.140"
 
+# Configuration
+clap = { version = "4.5.40", features = ["derive", "env"] }
+
 # Database
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-native-tls", "migrate"] }
 
-# HTTP client
+# HTTP client (for Telegram Bot API polling)
 reqwest = {version = "0.12.20", features = ["json"]}
 
-# HTTP server
+# HTTP server (for API)
 axum = "0.8.4"
 
-# Configuration
-clap = { version = "4.5.40", features = ["derive", "env"] }
+# Captcha image generation
+webp = "0.3.0"
+image = "0.25.6"
+rand = "0.9.1"
 
 # Logging
 tracing = "0.1.41"

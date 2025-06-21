@@ -22,6 +22,27 @@
             "cwd": "${workspaceFolder}",
             "envFile": "${workspaceFolder}/config/local.env",
             "args": []
+        },
+        {
+            "name": "[Terminal] Captcha (debug)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=captcha",
+                    "--package=vixen"
+                ],
+                "filter": {
+                    "name": "captcha",
+                    "kind": "bin"
+                },
+                "cwd": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "cwd": "${workspaceFolder}",
+            "args": []
         }
     ]
 }
