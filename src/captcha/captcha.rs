@@ -205,8 +205,8 @@ impl CaptchaService {
             [255, 159, 64, 80],  // Orange with transparency
         ];
 
-        // Draw 3-5 large background shapes
-        for _ in 0..rng.random_range(24..=32) {
+        // Draw 18-24 large background shapes
+        for _ in 0..rng.random_range(18..=24) {
             let shape_type = rng.random_range(0..3);
             let color = colors[rng.random_range(0..colors.len())];
 
@@ -269,8 +269,8 @@ impl CaptchaService {
             [180, 180, 180, 45], // Gray with low transparency
         ];
 
-        // Draw 2-4 foreground shapes
-        for _ in 0..rng.random_range(24..=32) {
+        // Draw 18-24 foreground shapes
+        for _ in 0..rng.random_range(18..=24) {
             let shape_type = rng.random_range(0..3);
             let color = colors[rng.random_range(0..colors.len())];
 
