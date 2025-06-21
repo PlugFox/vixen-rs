@@ -50,10 +50,13 @@ impl CaptchaService {
         // Generate random digits
         let digits_count: u8 = self.length as u8;
         let numbers: Vec<u8> = (0..digits_count).map(|_| rng.random_range(0..10)).collect();
-        let text: String = numbers.iter().map(|&n| (n + b'0') as char).collect();
-
-        // Create a new image with gradient background
+        let text: String = numbers.iter().map(|&n| (n + b'0') as char).collect(); // Create a new image with transparent background
         let mut img = RgbaImage::new(width, height);
+        // Initialize with transparent pixels
+        for pixel in img.pixels_mut() {
+            *pixel = Rgba([0, 0, 0, 0]); // Fully transparent
+        }
+
         self.draw_gradient_background(&mut img, &mut rng);
 
         // Draw background geometric shapes
@@ -79,13 +82,95 @@ impl CaptchaService {
             height,
         }
     }
+    /// Generates a new CAPTCHA image with configurable background transparency
+    pub async fn generate_with_transparency(&self, background_alpha: u8) -> Captcha {
+        // Lock the mutex to ensure thread safety and generate only one CAPTCHA at a time
+        let _lock = self.mutex.lock().await;
 
-    /// Draw gradient background
+        // Set the dimensions of the CAPTCHA image
+        let width = self.width;
+        let height = self.height;
+        let mut rng = rand::rng();
+
+        // Generate random digits
+        let digits_count: u8 = self.length as u8;
+        let numbers: Vec<u8> = (0..digits_count).map(|_| rng.random_range(0..10)).collect();
+        let text: String = numbers.iter().map(|&n| (n + b'0') as char).collect();
+
+        // Create a new image with transparent background
+        let mut img = RgbaImage::new(width, height);
+        // Initialize with transparent pixels
+        for pixel in img.pixels_mut() {
+            *pixel = Rgba([0, 0, 0, 0]); // Fully transparent
+        }
+
+        self.draw_gradient_background_with_alpha(&mut img, &mut rng, background_alpha);
+
+        // Draw background geometric shapes
+        self.draw_background_shapes(&mut img, &mut rng);
+
+        // Draw the CAPTCHA text with rotation and offset
+        self.draw_captcha_text(&mut img, &text, &mut rng);
+
+        // Draw foreground geometric shapes (semi-transparent)
+        self.draw_foreground_shapes(&mut img, &mut rng);
+
+        // Encode to WebP format
+        let mut bytes: Vec<u8> = Vec::new();
+        image::codecs::webp::WebPEncoder::new_lossless(&mut bytes)
+            .encode(&img, width, height, image::ExtendedColorType::Rgba8)
+            .expect("Failed to encode image to WebP");
+
+        Captcha {
+            numbers,
+            text,
+            bytes,
+            width,
+            height,
+        }
+    }
+
+    /// Draw gradient background with transparency
     fn draw_gradient_background(&self, img: &mut RgbaImage, rng: &mut impl Rng) {
         let width = img.width();
         let height = img.height();
 
-        // Choose random gradient colors (beautiful clean colors)
+        // Choose random gradient colors with transparency (beautiful clean colors)
+        let gradient_pairs = [
+            (([135, 206, 235], 180), ([255, 182, 193], 180)), // Sky blue to light pink
+            (([255, 218, 185], 180), ([255, 160, 122], 180)), // Peach to salmon
+            (([221, 160, 221], 180), ([230, 230, 250], 180)), // Plum to lavender
+            (([173, 216, 230], 180), ([255, 255, 224], 180)), // Light blue to light yellow
+            (([255, 228, 225], 180), ([255, 218, 185], 180)), // Misty rose to peach
+            (([240, 248, 255], 180), ([230, 230, 250], 180)), // Alice blue to lavender
+        ];
+
+        let ((start_color, start_alpha), (end_color, end_alpha)) =
+            gradient_pairs[rng.random_range(0..gradient_pairs.len())];
+
+        for y in 0..height {
+            let ratio = y as f32 / height as f32;
+            let r = (start_color[0] as f32 * (1.0 - ratio) + end_color[0] as f32 * ratio) as u8;
+            let g = (start_color[1] as f32 * (1.0 - ratio) + end_color[1] as f32 * ratio) as u8;
+            let b = (start_color[2] as f32 * (1.0 - ratio) + end_color[2] as f32 * ratio) as u8;
+            let a = (start_alpha as f32 * (1.0 - ratio) + end_alpha as f32 * ratio) as u8;
+
+            for x in 0..width {
+                self.blend_pixel(img, x, y, [r, g, b, a]);
+            }
+        }
+    }
+    /// Draw gradient background with custom alpha
+    fn draw_gradient_background_with_alpha(
+        &self,
+        img: &mut RgbaImage,
+        rng: &mut impl Rng,
+        custom_alpha: u8,
+    ) {
+        let width = img.width();
+        let height = img.height();
+
+        // Choose random gradient colors with custom transparency
         let gradient_pairs = [
             ([135, 206, 235], [255, 182, 193]), // Sky blue to light pink
             ([255, 218, 185], [255, 160, 122]), // Peach to salmon
@@ -104,7 +189,7 @@ impl CaptchaService {
             let b = (start_color[2] as f32 * (1.0 - ratio) + end_color[2] as f32 * ratio) as u8;
 
             for x in 0..width {
-                img.put_pixel(x, y, Rgba([r, g, b, 255]));
+                self.blend_pixel(img, x, y, [r, g, b, custom_alpha]);
             }
         }
     }
@@ -378,8 +463,7 @@ impl CaptchaService {
             });
         }
     }
-
-    /// Blend pixel with alpha
+    /// Blend pixel with alpha (proper alpha compositing)
     fn blend_pixel(&self, img: &mut RgbaImage, x: u32, y: u32, color: [u8; 4]) {
         if x >= img.width() || y >= img.height() {
             return;
@@ -387,12 +471,27 @@ impl CaptchaService {
 
         let pixel = img.get_pixel_mut(x, y);
         let src_alpha = color[3] as f32 / 255.0;
-        let dst_alpha = 1.0 - src_alpha;
+        let dst_alpha = pixel[3] as f32 / 255.0;
 
-        let new_r = (color[0] as f32 * src_alpha + pixel[0] as f32 * dst_alpha) as u8;
-        let new_g = (color[1] as f32 * src_alpha + pixel[1] as f32 * dst_alpha) as u8;
-        let new_b = (color[2] as f32 * src_alpha + pixel[2] as f32 * dst_alpha) as u8;
+        // Alpha compositing formula: out_alpha = src_alpha + dst_alpha * (1 - src_alpha)
+        let out_alpha = src_alpha + dst_alpha * (1.0 - src_alpha);
 
-        *pixel = Rgba([new_r, new_g, new_b, 255]);
+        if out_alpha > 0.0 {
+            // Premultiplied alpha blending
+            let new_r = ((color[0] as f32 * src_alpha
+                + pixel[0] as f32 * dst_alpha * (1.0 - src_alpha))
+                / out_alpha) as u8;
+            let new_g = ((color[1] as f32 * src_alpha
+                + pixel[1] as f32 * dst_alpha * (1.0 - src_alpha))
+                / out_alpha) as u8;
+            let new_b = ((color[2] as f32 * src_alpha
+                + pixel[2] as f32 * dst_alpha * (1.0 - src_alpha))
+                / out_alpha) as u8;
+            let new_a = (out_alpha * 255.0) as u8;
+
+            *pixel = Rgba([new_r, new_g, new_b, new_a]);
+        } else {
+            *pixel = Rgba([color[0], color[1], color[2], color[3]]);
+        }
     }
 }
