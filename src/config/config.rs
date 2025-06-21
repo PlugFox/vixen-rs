@@ -1,7 +1,7 @@
 use clap::Parser;
 
 /// Application settings loaded from environment or CLI args
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(
     name = "vixen",
     version,

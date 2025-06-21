@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::info;
 
+use crate::config;
+
 /// Health-check handler
 async fn health(State(db_pool): State<SqlitePool>) -> &'static str {
     let row: (i32,) = match sqlx::query_as("SELECT 1 AS health")
@@ -34,10 +36,11 @@ async fn not_found() -> &'static str {
 
 /// Run the HTTP API server with graceful shutdown
 pub async fn start(
-    addr: SocketAddr,
+    conf: &config::Config,
     pool: SqlitePool,
     shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
+    let addr: SocketAddr = conf.address.parse().expect("Invalid address format");
     let app = Router::new()
         .route("/health", get(health))
         .route("/healthz", get(health))

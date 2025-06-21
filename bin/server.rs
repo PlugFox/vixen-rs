@@ -3,7 +3,8 @@ use clap::Parser;
 use tracing::{debug, info /* trace, warn, error */};
 //use tracing_log::log;
 use std::error::Error;
-use tokio::{select, signal, spawn, sync::broadcast, sync::oneshot};
+use std::sync::Arc;
+use tokio::{select, sync::broadcast, sync::oneshot};
 use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -15,49 +16,64 @@ use vixen::db;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments - this will automatically handle --help
-    let config = config::Config::parse();
+    let config = Arc::new(config::Config::parse());
     init_logging(&config);
 
     info!("Starting Telegram Bot Server...");
-    debug!("Configuration:");
     debug!(
-        "  Environment: {}",
-        config.environment.as_deref().unwrap_or("production")
+        "Configuration:\n  Environment: {env}\n  Address: {address}\n  Log Level: {log_level}",
+        env = config.environment.as_deref().unwrap_or("production"),
+        address = config.address,
+        log_level = config.log_level,
     );
-    debug!("  Address: {}", config.address);
-    debug!("  Log Level: {}", config.log_level);
 
     // Initialize database pool
-    let pool = db::init_db(&config.database).await?;
+    let (api_db, bot_db);
+    {
+        let db_pool = db::init_db_pool(&config.database).await?;
+        // Make copies of the pool for API and Telegram services
+        (api_db, bot_db) = {
+            let pool = db::init_db_pool(&config.database).await?;
+            (pool.clone(), pool.clone())
+        };
+        drop(db_pool); // Drop the original pool to avoid holding onto it unnecessarily
+    }
 
     // Channels for graceful shutdowns
     let (api_tx, api_rx) = oneshot::channel::<()>();
     let (tg_tx, tg_rx) = oneshot::channel::<()>();
 
     // Spawn API service
-    let api_pool = pool.clone();
-    let api_addr: std::net::SocketAddr = config.address.parse().expect("Invalid address format");
-    let api_shutdown = async {
-        let _ = api_rx.await;
-    };
-    let api_handle = tokio::spawn(async move {
-        api::start(api_addr, api_pool, api_shutdown).await;
-    });
+    let api_handle: tokio::task::JoinHandle<()>;
+    {
+        let api_config = Arc::clone(&config);
+        let api_shutdown = async {
+            let _ = api_rx.await;
+        };
+        api_handle = tokio::spawn(async move {
+            api::start(&api_config, api_db, api_shutdown).await;
+        });
+    }
 
     // Spawn Telegram polling service
-    let tg_pool = pool.clone();
-    let tg_shutdown = async {
-        let _ = tg_rx.await;
-    };
-    let tg_handle = tokio::spawn(async move {
-        bot::poll(&config, tg_pool, tg_shutdown).await;
-    });
+    let tg_handle: tokio::task::JoinHandle<()>;
+    {
+        let tg_config = Arc::clone(&config);
+        let tg_shutdown = async {
+            let _ = tg_rx.await;
+        };
+        tg_handle = tokio::spawn(async move {
+            bot::poll(&tg_config, bot_db, tg_shutdown).await;
+        });
+    }
 
     // Wait for shutdown signal (Ctrl+C)
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for shutdown");
-    tracing::info!("Shutdown signal received");
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for shutdown");
+        tracing::info!("Shutdown signal received");
+    }
 
     // Notify services to stop
     let _ = api_tx.send(());
@@ -70,6 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Initialize logging with configurable levels and formats
+/// This function sets up the logging system using `tracing` and `tracing_subscriber`.
 fn init_logging(config: &config::Config) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     /* let env_filter = EnvFilter::try_from_env("APP_LOG")

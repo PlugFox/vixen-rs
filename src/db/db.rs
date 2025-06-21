@@ -18,7 +18,7 @@ pub fn ensure_database_directory(database_url: &str) -> Result<()> {
 }
 
 /// Initialize the SQLite connection pool
-pub async fn init_db(database_url: &str) -> Result<SqlitePool> {
+pub async fn init_db_pool(database_url: &str) -> Result<SqlitePool> {
     // Ensure the database directory exists
     ensure_database_directory(database_url)?;
 
