@@ -7,6 +7,8 @@ use tokio::{select, signal, spawn, sync::broadcast};
 use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+use vixen::config::Config;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Shutdown channel for graceful shutdown
@@ -23,11 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.environment.as_deref().unwrap_or("production")
     );
     debug!("  Address: {}", config.address);
-    debug!("  Port: {}", config.port);
     debug!("  Log Level: {}", config.log_level);
 
     // Start the HTTP server
-    let http_shutdown_rx = shutdown_tx.subscribe();
+    /* let http_shutdown_rx = shutdown_tx.subscribe();
     let http_shutdown_tx = shutdown_tx.clone();
     let http_handle = spawn(async move {
         if let Err(e) = http_server(http_shutdown_rx).await {
@@ -35,10 +36,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // при ошибке проталкиваем shutdown
             let _ = http_shutdown_tx.send(());
         }
-    });
+    }); */
 
     // Start the bot polling
-    let bot_shutdown_rx = shutdown_tx.subscribe();
+    /* let bot_shutdown_rx = shutdown_tx.subscribe();
     let bot_shutdown_tx = shutdown_tx.clone();
     let bot_handle = spawn(async move {
         if let Err(e) = bot_polling(bot_shutdown_rx).await {
@@ -46,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = bot_shutdown_tx.send(());
         }
     });
-    info!("Server would start at {}:{}", config.address, config.port);
+    info!("Server would start at {}:{}", config.address, config.port); */
 
     // Wait for shutdown signal (Ctrl+C)
     signal::ctrl_c().await?;
@@ -55,65 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = shutdown_tx.send(());
 
-    let _ = http_handle.await;
-    let _ = bot_handle.await;
+    /* let _ = http_handle.await;
+    let _ = bot_handle.await; */
 
     Ok(())
-}
-
-#[derive(Parser, Debug)]
-#[command(
-    name = "vixen",
-    version,
-    about = "Telegram Bot Server for automatically banning spammers",
-    long_about = "A Telegram bot server that automatically detects and bans spammers in Telegram chats. \
-                  This server provides a REST API and connects to the Telegram Bot API to monitor \
-                  chat messages and take action against spam accounts."
-)]
-pub struct Config {
-    /// Environment to run the server in (CLI > ENV > default)
-    #[arg(
-        short = 'e',
-        long = "env",
-        env = "VIXEN_ENVIRONMENT",
-        default_value = "development",
-        help = "Environment to run the server in (development, production, etc.)",
-        aliases = ["environment", "mode"]
-    )]
-    environment: Option<String>,
-
-    /// Address to bind the server to (CLI > ENV > default)
-    #[arg(
-        short = 'a',
-        long,
-        env = "VIXEN_ADDRESS",
-        default_value = "0.0.0.0",
-        aliases = ["host", "addr"],
-        help = "IP address to bind the server to"
-    )]
-    address: String,
-
-    /// Port to bind the server to (CLI > ENV > default)
-    #[arg(
-        short = 'p',
-        long = "port",
-        env = "VIXEN_PORT",
-        default_value_t = 8080,
-        help = "Port number to bind the server to"
-    )]
-    port: u16,
-
-    /// Level of logging (CLI > ENV > default)
-    /// This can be set to trace, debug, info, warn, or error
-    #[arg(
-        short = 'l',
-        long = "logs",
-        env = "VIXEN_LOGS",
-        default_value = "info",
-        aliases = ["log", "level", "verbose"],
-        help = "Logging level (trace, debug, info, warn, error)"
-    )]
-    log_level: String,
 }
 
 fn init_logging(config: &Config) {

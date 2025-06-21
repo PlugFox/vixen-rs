@@ -19,9 +19,23 @@ panic = "abort"
 strip = true
 
 [dependencies]
+
+# Async runtime
 futures = "0.3.31"
-tokio = { version = "1.40.0", features = ["full"] }
+tokio = { version = "1.45.1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
+
+# Utilities
+anyhow = "1.0.98"
+
+# Database
+sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-native-tls"] }
+
+# HTTP client
+reqwest = "0.12.20"
+
+# HTTP server
+axum = "0.8.4"
 
 # Configuration
 clap = { version = "4.5.40", features = ["derive", "env"] }
