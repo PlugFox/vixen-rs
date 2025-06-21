@@ -14,9 +14,6 @@ use vixen::db;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Shutdown channel for graceful shutdown
-    let (shutdown_tx, _) = broadcast::channel::<()>(1);
-
     // Parse command line arguments - this will automatically handle --help
     let config = config::Config::parse();
     init_logging(&config);
@@ -30,14 +27,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("  Address: {}", config.address);
     debug!("  Log Level: {}", config.log_level);
 
-    // initialize database pool
+    // Initialize database pool
     let pool = db::init_db(&config.database).await?;
 
-    // channels for graceful shutdowns
+    // Channels for graceful shutdowns
     let (api_tx, api_rx) = oneshot::channel::<()>();
     let (tg_tx, tg_rx) = oneshot::channel::<()>();
 
-    // spawn API service
+    // Spawn API service
     let api_pool = pool.clone();
     let api_addr: std::net::SocketAddr = config.address.parse().expect("Invalid address format");
     let api_shutdown = async {
@@ -47,47 +44,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         api::start(api_addr, api_pool, api_shutdown).await;
     });
 
-    // spawn Telegram polling service
+    // Spawn Telegram polling service
     let tg_pool = pool.clone();
     let token = config.telegram.clone();
+    let chats = config.chats.clone(); // Assuming you have a list of chat IDs in the config
     let tg_shutdown = async {
         let _ = tg_rx.await;
     };
     let tg_handle = tokio::spawn(async move {
-        bot::poll(token, tg_pool, tg_shutdown).await;
+        bot::poll(token, chats, tg_pool, tg_shutdown).await;
     });
-
-    // Start the HTTP server
-    /* let http_shutdown_rx = shutdown_tx.subscribe();
-    let http_shutdown_tx = shutdown_tx.clone();
-    let http_handle = spawn(async move {
-        if let Err(e) = http_server(http_shutdown_rx).await {
-            eprintln!("HTTP server error: {}", e);
-            // при ошибке проталкиваем shutdown
-            let _ = http_shutdown_tx.send(());
-        }
-    }); */
-
-    // Start the bot polling
-    /* let bot_shutdown_rx = shutdown_tx.subscribe();
-    let bot_shutdown_tx = shutdown_tx.clone();
-    let bot_handle = spawn(async move {
-        if let Err(e) = bot_polling(bot_shutdown_rx).await {
-            eprintln!("Bot polling error: {}", e);
-            let _ = bot_shutdown_tx.send(());
-        }
-    });
-    info!("Server would start at {}:{}", config.address, config.port); */
 
     // Wait for shutdown signal (Ctrl+C)
-    signal::ctrl_c().await?;
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to listen for shutdown");
+    tracing::info!("Shutdown signal received");
 
-    // let _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    // Notify services to stop
+    let _ = api_tx.send(());
+    let _ = tg_tx.send(());
 
-    let _ = shutdown_tx.send(());
-
-    /* let _ = http_handle.await;
-    let _ = bot_handle.await; */
+    // Wait for tasks to complete
+    let _ = api_handle.await;
+    let _ = tg_handle.await;
 
     Ok(())
 }

@@ -25,7 +25,7 @@ struct GetUpdates {
 }
 
 /// Long-poll Telegram updates, stop on shutdown signal
-pub async fn poll<F>(token: String, pool: SqlitePool, shutdown_signal: F)
+pub async fn poll<F>(token: String, chats: Vec<String>, pool: SqlitePool, shutdown_signal: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
