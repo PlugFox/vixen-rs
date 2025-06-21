@@ -1,5 +1,5 @@
 use axum::{Router, extract::State, routing::get};
-use sqlx::{Executor, SqlitePool};
+use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::info;
