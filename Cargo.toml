@@ -52,8 +52,10 @@ reqwest = {version = "0.12.20", features = ["json"]}
 axum = "0.8.4"
 
 # Captcha image generation
-webp = "0.3.0"
-image = "0.25.6"
+#webp = "0.3.0"
+#libwebp-sys = { version = "0.12", default-features = false, features = ["parallel"] }
+image = { version = "0.25.6", features = ["webp"] }
+rusttype = "0.9.3"
 rand = "0.9.1"
 
 # Logging
