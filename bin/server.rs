@@ -46,8 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn Telegram polling service
     let tg_pool = pool.clone();
-    let token = config.telegram.clone();
-    let chats = config.chats.clone(); // Assuming you have a list of chat IDs in the config
     let tg_shutdown = async {
         let _ = tg_rx.await;
     };
