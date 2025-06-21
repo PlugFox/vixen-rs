@@ -1,38 +1,13 @@
-use axum::{Router, extract::State, routing::get};
+use axum::middleware::from_fn_with_state;
+use axum::{Router, routing::get};
+
 use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::info;
 
+use crate::api::{middleware, routes};
 use crate::config;
-
-/// Health-check handler
-async fn health(State(db_pool): State<SqlitePool>) -> &'static str {
-    let row: (i32,) = match sqlx::query_as("SELECT 1 AS health")
-        .fetch_one(&db_pool)
-        .await
-    {
-        Ok(row) => row,
-        Err(_) => {
-            // Return 500 Internal Server Error if the database connection fails
-            info!("Database connection failed");
-            return axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                .canonical_reason()
-                .unwrap_or("Internal Server Error");
-        }
-    };
-
-    if row.0 == 1 {
-        "OK"
-    } else {
-        "Database connection failed"
-    }
-}
-
-/// Fallback handler for 404 Not Found
-async fn not_found() -> &'static str {
-    "Not Found"
-}
 
 /// Run the HTTP API server with graceful shutdown
 pub async fn start(
@@ -40,25 +15,46 @@ pub async fn start(
     pool: SqlitePool,
     shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
+    // Try to parse the address from the configuration
     let addr: SocketAddr = conf.address.parse().expect("Invalid address format");
+
+    // Initialize the private scope for authentication middleware
+    // This scope contains the secret used for authentication
+    let private = middleware::AdminScope {
+        secret: conf.secret.clone(),
+    };
+
+    // Public routes without authentication
+    let public_routes = Router::new()
+        .route("/health", get(routes::health))
+        .route("/healthz", get(routes::health))
+        .route("/404", get(routes::not_found));
+
+    // Private routes that require authentication
+    let protected_routes = Router::new()
+        .route("/download", get(routes::download_database))
+        .route("/database", get(routes::download_database))
+        .layer(from_fn_with_state(private, middleware::auth_middleware));
+
     let app = Router::new()
-        .route("/health", get(health))
-        .route("/healthz", get(health))
-        // Add more routes as needed
-        .route("/404", get(not_found))
-        .fallback(not_found)
+        .merge(public_routes)
+        .nest("/admin", protected_routes)
+        .fallback(routes::not_found)
         .with_state(pool);
 
+    // Listen on the specified address and handle incoming connections
     let listener = TcpListener::bind(&addr)
         .await
         .expect("Failed to bind to address");
 
     info!(%addr, "Starting API server");
 
+    // Start the server with graceful shutdown support
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal)
         .await
         .expect("API server crashed");
 
+    // Right after the server stops, we log that the server has stopped
     info!("API server stopped");
 }
