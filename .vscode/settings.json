@@ -91,16 +91,16 @@
         "RUST_BACKTRACE": "1"
     },
     // Test discovery and execution settings
-    "rust-analyzer.checkOnSave.extraArgs": [
+    /* "rust-analyzer.checkOnSave.extraArgs": [
         "--target-dir",
         "target/analyzer"
-    ],
+    ], */
     "rust-analyzer.cargo.targetDir": "target/analyzer",
     // Performance optimizations
-    "rust-analyzer.files.excludeDirs": [
+    /* "rust-analyzer.files.excludeDirs": [
         "target/debug",
         "target/release"
-    ],
+    ], */
     "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
     "rust-analyzer.workspace.symbol.search.kind": "all_symbols"
 }

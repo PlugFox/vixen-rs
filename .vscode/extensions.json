@@ -34,7 +34,7 @@
         // Environment files
         "mikestead.dotenv",
         // Theme and icons
-        "pkief.material-icon-theme",
-        "github.github-vscode-theme"
+        /* "pkief.material-icon-theme",
+        "github.github-vscode-theme" */
     ]
 }
