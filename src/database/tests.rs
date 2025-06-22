@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::db::DB;
+    use crate::database::DB;
 
     //use super::*;
     //use std::collections::HashMap;

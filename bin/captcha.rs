@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use vixen::captcha::captcha::CaptchaService;
+use vixen::captcha::CaptchaService;
 
 // Generate captcha.webp image
 // cargo run --bin captcha

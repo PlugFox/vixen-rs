@@ -5,7 +5,7 @@ use serde_json;
 use std::{collections::HashSet, ops::Add, time::Duration};
 use tracing::{debug, error, info};
 
-use crate::db::DB;
+use crate::database::DB;
 
 #[derive(Debug, Deserialize)]
 struct User {

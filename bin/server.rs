@@ -8,15 +8,18 @@ use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use vixen::api;
-use vixen::bot;
 use vixen::config;
-use vixen::db;
+use vixen::database;
+use vixen::telegram;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments - this will automatically handle --help
     let config = Arc::new(config::Config::parse());
-    init_logging(&config);
+    init_logging(
+        &config.log_level,
+        config.environment.as_deref().unwrap_or("production"),
+    );
 
     info!("starting Vixen Service");
     /* debug!(
@@ -31,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Make copies of the pool for API and Telegram services
         (api_db, bot_db) = {
-            let pool = db::DB::connect(&config.database).await?;
+            let pool = database::DB::connect(&config.database).await?;
             (pool.clone(), pool.clone())
         };
     }
@@ -61,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         tg_handle = tokio::spawn(async move {
             // Initialize the bot with the configuration and database
-            let bot = bot::Bot::new(&tg_config.telegram, &tg_config.chats, bot_db.clone());
+            let bot = telegram::Bot::new(&tg_config.telegram, &tg_config.chats, bot_db.clone());
             bot.poll(tg_shutdown).await;
         });
     }
@@ -87,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Initialize logging with configurable levels and formats
 /// This function sets up the logging system using `tracing` and `tracing_subscriber`.
-fn init_logging(config: &config::Config) {
+fn init_logging(log_level: &str, environment: &str) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     /* let env_filter = EnvFilter::try_from_env("APP_LOG")
     .or_else(|_| EnvFilter::try_from_default_env())
@@ -96,8 +99,7 @@ fn init_logging(config: &config::Config) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     let env_filter = EnvFilter::builder()
         .with_default_directive(
-            config
-                .log_level
+            log_level
                 .parse()
                 .unwrap_or_else(|_| "info".parse().unwrap()),
         )
@@ -117,7 +119,7 @@ fn init_logging(config: &config::Config) {
         .expect("Failed to create file appender");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = fmt::layer()
-        .with_ansi(config.environment.as_deref() != Some("production")) // ANSI в dev, plain в prod
+        .with_ansi(environment != "production") // ANSI в dev, plain в prod
         .with_writer(non_blocking)
         .json(); // JSON-формат для парсинга
 

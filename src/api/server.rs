@@ -20,7 +20,7 @@ use tracing::info;
 
 use crate::api::{middleware, routes};
 use crate::config;
-use crate::db::DB;
+use crate::database::DB;
 
 #[derive(Clone)]
 pub struct ApiState {
