@@ -102,5 +102,13 @@
         "target/release"
     ], */
     "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
-    "rust-analyzer.workspace.symbol.search.kind": "all_symbols"
+    "rust-analyzer.workspace.symbol.search.kind": "all_symbols",
+    "cSpell.enabledFileTypes": {
+        "toml": false, // Disable spell checking for cargo.toml files
+        "json": true,
+        "md": true,
+        "sql": true,
+        "rs": true,
+        "*": true
+    }
 }
