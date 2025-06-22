@@ -4,4 +4,4 @@ mod middleware;
 mod response;
 mod routes;
 
-pub use server::start;
+pub use server::Server;

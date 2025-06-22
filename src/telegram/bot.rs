@@ -172,7 +172,7 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub fn new(token: &str, chats: &[String], db: DB) -> Self {
+    pub fn new(token: String, chats: Vec<String>, db: DB) -> Self {
         let chats_set: HashSet<i64> = chats
             .iter()
             .filter_map(|chat| chat.parse::<i64>().ok())

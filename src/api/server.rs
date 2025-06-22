@@ -19,7 +19,6 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::api::{middleware, routes};
-use crate::config;
 use crate::database::DB;
 
 #[derive(Clone)]
@@ -27,151 +26,154 @@ pub struct ApiState {
     pub db: DB,
 }
 
-/// Run the HTTP API server with graceful shutdown
-pub async fn start(
-    conf: &config::Config,
+pub struct Server {
     db: DB,
-    shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
-) {
-    // Try to parse the address from the configuration
-    let addr: SocketAddr = conf.address.parse().expect("invalid address format");
+    address: String,
+    secret: String,
+}
 
-    // Initialize the private scope for authentication middleware
-    // This scope contains the secret used for authentication
-    let private = middleware::AdminScope {
-        secret: conf.secret.clone(),
-    };
+impl Server {
+    pub fn new(address: String, secret: String, db: DB) -> Self {
+        Self {
+            address,
+            secret,
+            db,
+        }
+    }
 
-    let state = ApiState { db: db.clone() };
+    /// Run the HTTP API server with graceful shutdown
+    pub async fn start(
+        &self,
+        shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        // Try to parse the address from the configuration
+        let addr: SocketAddr = self.address.parse().expect("invalid address format");
 
-    // Initialize rate limiting state (100 requests per minute per IP)
-    let rate_limit_state = middleware::RateLimitState::new(100, 60);
+        // Initialize the private scope for authentication middleware
+        // This scope contains the secret used for authentication
+        let private = middleware::AdminScope {
+            secret: self.secret.clone(),
+        };
 
-    /* // --- Meta --- //
-    ..get('/<ignored|health|healthz|status>', $GET$HealthCheck)
-    ..get('/<ignored|about|version>', $GET$About)
-    // --- Database --- //
-    ..get('/admin/<ignored|db|database|sqlite|sqlite3>', $GET$Admin$Database)
-    // --- Logs --- //
-    ..get('/admin/logs', $GET$Admin$Logs)
-    ..get('/admin/logs/<id>', $GET$Admin$Logs)
-    // --- Users --- //
-    ..get('/admin/users/verified', $GET$Admin$Users$Verified)
-    ..put('/admin/users/verified', $PUT$Admin$Users$Verified)
-    ..delete('/admin/users/verified', $DELETE$Admin$Users$Verified)
-    // --- Messages --- //
-    ..get('/admin/messages/deleted', $GET$Admin$Messages$Deleted)
-    ..get('/admin/messages/deleted/hash', $GET$Admin$Messages$Deleted$Hash)
-    // --- Reports --- //
-    ..get('/report', $GET$Report)
-    ..get('/admin/report', $GET$Admin$Report)
-    ..get('/admin/chart', $GET$Admin$Chart)
-    ..get('/admin/chart.png', $GET$Admin$ChartPng)
-    ..get('/admin/summary/<cid>', $GET$Admin$Summary) */
+        // Create the application state that will be shared across all routes
+        let state = ApiState {
+            db: self.db.clone(),
+        };
 
-    // Public routes without authentication
-    let public_routes: Router<ApiState> = Router::new()
-        // --- Meta --- //
-        .route("/report", get(routes::get_report))
-        .route("/health", get(routes::get_health))
-        .route("/healthz", get(routes::get_health))
-        .route("/status", get(routes::get_health))
-        .route("/about", get(routes::get_about))
-        .route("/version", get(routes::get_about))
-        .route("/404", get(routes::not_found));
+        // Initialize rate limiting state (100 requests per minute per IP)
+        let rate_limit_state = middleware::RateLimitState::new(100, 60);
 
-    // Private routes that require authentication
-    let protected_routes: Router<ApiState> = Router::new()
-        // --- Database --- //
-        .route("/download", get(routes::admin_get_download_database))
-        .route("/database", get(routes::admin_get_download_database))
-        .route("/sqlite", get(routes::admin_get_download_database))
-        .route("/sqlite3", get(routes::admin_get_download_database))
-        .route("/db", get(routes::admin_get_download_database))
-        // --- Logs --- //
-        .route("/logs", get(routes::admin_get_logs))
-        .route("/logs/{id}", get(routes::admin_get_logs_by_id))
-        // --- Users --- //
-        .route("/users/verified", get(routes::admin_get_users_verified))
-        .route("/users/verified", put(routes::admin_put_users_verified))
-        .route(
-            "/users/verified",
-            delete(routes::admin_delete_verified_users),
+        // Public routes without authentication
+        let public_routes: Router<ApiState> = Self::public_routes();
+
+        // Private routes that require authentication
+        let protected_routes: Router<ApiState> = Self::private_routes()
+            // Apply the authentication middleware to all protected routes
+            .layer(from_fn_with_state(private, middleware::auth_middleware));
+
+        let app = Router::new()
+            .merge(public_routes)
+            .nest("/admin", protected_routes)
+            .fallback(routes::not_found)
+            // Inject the API state into the application
+            .with_state(state)
+            // Add global middleware layers in correct order (innermost to outermost)
+            // Panic recovery should be outermost to catch any panics
+            .layer(from_fn(middleware::panic_recovery_middleware))
+            // Metrics middleware to add performance headers
+            .layer(from_fn(middleware::metrics_middleware))
+            // Security headers
+            .layer(from_fn(middleware::security_middleware))
+            // Custom logging with IP detection
+            .layer(from_fn(middleware::logging_middleware))
+            // Rate limiting (requires ConnectInfo)
+            .layer(from_fn_with_state(
+                rate_limit_state,
+                middleware::rate_limit_middleware,
+            ))
+            // Request validation
+            .layer(from_fn(middleware::request_validation_middleware))
+            // Request ID for tracing and logging
+            .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+            // Propagate the request ID to downstream services
+            .layer(PropagateRequestIdLayer::x_request_id())
+            // Trace layer for logging request/response details
+            .layer(TraceLayer::new_for_http())
+            // CORS layer
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(Any)
+                    .allow_methods(Any)
+                    .allow_headers(Any)
+                    .max_age(Duration::from_secs(3600)),
+            )
+            // Timeout for requests (30 seconds)
+            .layer(TimeoutLayer::new(Duration::from_secs(30)))
+            // Compression for responses
+            .layer(CompressionLayer::new())
+            // Limit request body size to 5 MB (should be innermost)
+            .layer(RequestBodyLimitLayer::new(5 * 1024 * 1024));
+
+        // Listen on the specified address and handle incoming connections
+        let listener = TcpListener::bind(&addr)
+            .await
+            .expect("failed to bind to address");
+
+        info!(%addr, "Starting api server");
+
+        // Start the server with graceful shutdown support
+        // Включаем поддержку ConnectInfo для получения IP адресов клиентов
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        // --- Messages --- //
-        .route("/messages/deleted", get(routes::admin_get_messages_deleted))
-        .route(
-            "/messages/deleted/hash",
-            get(routes::admin_get_messages_deleted_hash),
-        )
-        // --- Reports --- //
-        .route("/report", get(routes::admin_get_report))
-        .route("/chart", get(routes::admin_get_chart))
-        .route("/chart.png", get(routes::admin_get_chart_png))
-        .route("/summary/{cid}", get(routes::admin_get_summary))
-        // Apply the authentication middleware to all protected routes
-        .layer(from_fn_with_state(private, middleware::auth_middleware));
-
-    let app = Router::new()
-        .merge(public_routes)
-        .nest("/admin", protected_routes)
-        .fallback(routes::not_found)
-        // Inject the API state into the application
-        .with_state(state)
-        // Add global middleware layers in correct order (innermost to outermost)
-        // Panic recovery should be outermost to catch any panics
-        .layer(from_fn(middleware::panic_recovery_middleware))
-        // Metrics middleware to add performance headers
-        .layer(from_fn(middleware::metrics_middleware))
-        // Security headers
-        .layer(from_fn(middleware::security_middleware))
-        // Custom logging with IP detection
-        .layer(from_fn(middleware::logging_middleware))
-        // Rate limiting (requires ConnectInfo)
-        .layer(from_fn_with_state(
-            rate_limit_state,
-            middleware::rate_limit_middleware,
-        ))
-        // Request validation
-        .layer(from_fn(middleware::request_validation_middleware))
-        // Request ID for tracing and logging
-        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-        // Propagate the request ID to downstream services
-        .layer(PropagateRequestIdLayer::x_request_id())
-        // Trace layer for logging request/response details
-        .layer(TraceLayer::new_for_http())
-        // CORS layer
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any)
-                .max_age(Duration::from_secs(3600)),
-        )
-        // Timeout for requests (30 seconds)
-        .layer(TimeoutLayer::new(Duration::from_secs(30)))
-        // Compression for responses
-        .layer(CompressionLayer::new())
-        // Limit request body size to 5 MB (should be innermost)
-        .layer(RequestBodyLimitLayer::new(5 * 1024 * 1024));
-
-    // Listen on the specified address and handle incoming connections
-    let listener = TcpListener::bind(&addr)
+        .with_graceful_shutdown(shutdown_signal)
         .await
-        .expect("failed to bind to address");
+        .expect("api server crashed");
 
-    info!(%addr, "Starting api server");
+        // Right after the server stops, we log that the server has stopped
+        info!("api server stopped");
+    }
 
-    // Start the server with graceful shutdown support
-    // Включаем поддержку ConnectInfo для получения IP адресов клиентов
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal)
-    .await
-    .expect("api server crashed");
+    fn public_routes() -> Router<ApiState> {
+        Router::new()
+            .route("/report", get(routes::get_report))
+            .route("/health", get(routes::get_health))
+            .route("/healthz", get(routes::get_health))
+            .route("/status", get(routes::get_health))
+            .route("/about", get(routes::get_about))
+            .route("/version", get(routes::get_about))
+            .route("/404", get(routes::not_found))
+    }
 
-    // Right after the server stops, we log that the server has stopped
-    info!("api server stopped");
+    fn private_routes() -> Router<ApiState> {
+        Router::new()
+            // --- Database --- //
+            .route("/download", get(routes::admin_get_download_database))
+            .route("/database", get(routes::admin_get_download_database))
+            .route("/sqlite", get(routes::admin_get_download_database))
+            .route("/sqlite3", get(routes::admin_get_download_database))
+            .route("/db", get(routes::admin_get_download_database))
+            // --- Logs --- //
+            .route("/logs", get(routes::admin_get_logs))
+            .route("/logs/{id}", get(routes::admin_get_logs_by_id))
+            // --- Users --- //
+            .route("/users/verified", get(routes::admin_get_users_verified))
+            .route("/users/verified", put(routes::admin_put_users_verified))
+            .route(
+                "/users/verified",
+                delete(routes::admin_delete_verified_users),
+            )
+            // --- Messages --- //
+            .route("/messages/deleted", get(routes::admin_get_messages_deleted))
+            .route(
+                "/messages/deleted/hash",
+                get(routes::admin_get_messages_deleted_hash),
+            )
+            // --- Reports --- //
+            .route("/report", get(routes::admin_get_report))
+            .route("/chart", get(routes::admin_get_chart))
+            .route("/chart.png", get(routes::admin_get_chart_png))
+            .route("/summary/{cid}", get(routes::admin_get_summary))
+    }
 }

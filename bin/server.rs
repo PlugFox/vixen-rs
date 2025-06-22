@@ -46,25 +46,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn API service
     let api_handle: tokio::task::JoinHandle<()>;
     {
-        let api_config = Arc::clone(&config);
+        let (address, secret) = (config.address.clone(), config.secret.clone());
         let api_shutdown = async {
             let _ = api_rx.await;
         };
         api_handle = tokio::spawn(async move {
-            api::start(&api_config, api_db, api_shutdown).await;
+            let server = api::Server::new(address, secret, api_db);
+            server.start(api_shutdown).await;
         });
     }
 
     // Spawn Telegram polling service
     let tg_handle: tokio::task::JoinHandle<()>;
     {
-        let tg_config = Arc::clone(&config);
+        let (telegram, chats) = (config.telegram.clone(), config.chats.clone());
         let tg_shutdown = async {
             let _ = tg_rx.await;
         };
         tg_handle = tokio::spawn(async move {
             // Initialize the bot with the configuration and database
-            let bot = telegram::Bot::new(&tg_config.telegram, &tg_config.chats, bot_db.clone());
+            let bot = telegram::Bot::new(telegram, chats, bot_db);
             bot.poll(tg_shutdown).await;
         });
     }
