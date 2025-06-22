@@ -24,6 +24,12 @@ pub struct CaptchaService {
     font: Font<'static>,
 }
 
+impl Default for CaptchaService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CaptchaService {
     /// Creates a new instance of the CaptchaService
     pub fn new() -> Self {
