@@ -61,7 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = tg_rx.await;
         };
         tg_handle = tokio::spawn(async move {
-            bot::poll(&tg_config, bot_db, tg_shutdown).await;
+            // Initialize the bot with the configuration and database
+            let bot = bot::Bot::new(&tg_config.telegram, &tg_config.chats, bot_db.clone());
+            bot.poll(tg_shutdown).await;
         });
     }
 

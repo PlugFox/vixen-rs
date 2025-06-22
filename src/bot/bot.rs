@@ -166,114 +166,130 @@ struct GetUpdates {
     result: Vec<Update>,
 }
 
-/// Long-poll Telegram updates, stop on shutdown signal
-pub async fn poll<F>(conf: &config::Config, pool: SqlitePool, shutdown_signal: F)
-where
-    F: std::future::Future<Output = ()> + Send + 'static,
-{
-    let timeout = Duration::from_secs(30); // Default timeout for HTTP requests
-    let client = Client::builder()
-        .timeout(timeout.add(Duration::from_secs(5))) // A bit longer timeout for Telegram API requests
-        .build()
-        .expect("failed to build HTTP client");
+pub struct Bot {
+    db: SqlitePool,
+    token: String,
+    chats: HashSet<i64>,
+}
 
-    let mut offset: i64 = 0;
-    info!("starting Telegram polling");
-    let token: &str = &conf.telegram;
-    let chats: HashSet<i64> = conf
-        .chats
-        .iter()
-        .map(|chat| chat.parse::<i64>().unwrap_or(0))
-        .filter(|&id| id != 0) // Filter out invalid chat IDs
-        .collect(); // Collect chat IDs from configuration
-    let has_chats = !chats.is_empty();
+impl Bot {
+    pub fn new(token: &str, chats: &[String], db: SqlitePool) -> Self {
+        let chats_set: HashSet<i64> = chats
+            .iter()
+            .filter_map(|chat| chat.parse::<i64>().ok())
+            .collect();
+        Bot {
+            db,
+            token: token.to_string(),
+            chats: chats_set,
+        }
+    }
 
-    tokio::pin!(shutdown_signal);
+    /// Long-poll Telegram updates, stop on shutdown signal
+    pub async fn poll<F>(&self, shutdown_signal: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let timeout = Duration::from_secs(30); // Default timeout for HTTP requests
+        let client = Client::builder()
+            .timeout(timeout.add(Duration::from_secs(5))) // A bit longer timeout for Telegram API requests
+            .build()
+            .expect("failed to build HTTP client");
 
-    loop {
-        tokio::select! {
-            _ = &mut shutdown_signal => {
-                info!("telegram polling stopped");
-                break;
-            }
-            result = get_updates(
-                &client, // HTTP client for Telegram API
-                token, // Telegram Bot API token
-                offset, // offset for updates
-                timeout.as_secs(), // timeout in seconds
-                100, // limit of updates to fetch
-                vec!["message", "callback_query"]
-            ) => {
-                match result {
-                    Ok(updates) => {
-                        for upd in updates {
-                            offset = upd.update_id + 1;
-                            info!("received update: {}", upd);
-                            // Process each update from Telegram Bot API
-                            if let Some(message) = upd.message {
-                                if message.chat.chat_type == ChatType::Private {
-                                    debug!("ignoring private message from chat#{}", message.chat.id);
-                                    continue; // Skip private messages
-                                } else if has_chats && !chats.contains(&message.chat.id) {
-                                    debug!("ignoring message from chat#{}", message.chat.id);
-                                    continue; // Skip messages from non-configured chats
+        let mut offset: i64 = 0;
+        info!("starting Telegram polling");
+        let token: &str = &self.token;
+        let chats: HashSet<i64> = self.chats.clone();
+        let has_chats = !chats.is_empty();
+        let pool: SqlitePool = self.db.clone();
+
+        tokio::pin!(shutdown_signal);
+
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_signal => {
+                    info!("telegram polling stopped");
+                    break;
+                }
+                result = Self::get_updates(
+                    &client, // HTTP client for Telegram API
+                    token, // Telegram Bot API token
+                    offset, // offset for updates
+                    timeout.as_secs(), // timeout in seconds
+                    100, // limit of updates to fetch
+                    vec!["message", "callback_query"]
+                ) => {
+                    match result {
+                        Ok(updates) => {
+                            for upd in updates {
+                                offset = upd.update_id + 1;
+                                info!("received update: {}", upd);
+                                // Process each update from Telegram Bot API
+                                if let Some(message) = upd.message {
+                                    if message.chat.chat_type == ChatType::Private {
+                                        debug!("ignoring private message from chat#{}", message.chat.id);
+                                        continue; // Skip private messages
+                                    } else if has_chats && !chats.contains(&message.chat.id) {
+                                        debug!("ignoring message from chat#{}", message.chat.id);
+                                        continue; // Skip messages from non-configured chats
+                                    }
+
+                                    info!("processing message from chat#{}", message.chat.id);
+                                    Self::process_message(message, &pool).await;
                                 }
-
-                                info!("processing message from chat#{}", message.chat.id);
-                                process_message(message, &pool).await;
                             }
                         }
-                    }
-                    Err(err) => {
-                        error!(%err, "error polling Telegram ");
-                        // A bit of backoff to avoid hammering the API
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        Err(err) => {
+                            error!(%err, "error polling Telegram ");
+                            // A bit of backoff to avoid hammering the API
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
                     }
                 }
             }
         }
     }
-}
 
-async fn get_updates(
-    client: &Client,
-    token: &str,
-    offset: i64,
-    timeout: u64,
-    limit: u8,
-    allowed_updates: Vec<&str>,
-) -> Result<Vec<Update>, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!(
-        concat!(
-            "https://api.telegram.org",
-            "/bot{token}",
-            "/getUpdates",
-            "?offset={offset}",
-            "&timeout={timeout}",
-            "&limit={limit}",
-            "&allowed_updates={filter}"
-        ),
-        token = token,
-        offset = offset,
-        timeout = timeout,
-        limit = limit,
-        filter = allowed_updates.join(",")
-    );
+    async fn get_updates(
+        client: &Client,
+        token: &str,
+        offset: i64,
+        timeout: u64,
+        limit: u8,
+        allowed_updates: Vec<&str>,
+    ) -> Result<Vec<Update>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            concat!(
+                "https://api.telegram.org",
+                "/bot{token}",
+                "/getUpdates",
+                "?offset={offset}",
+                "&timeout={timeout}",
+                "&limit={limit}",
+                "&allowed_updates={filter}"
+            ),
+            token = token,
+            offset = offset,
+            timeout = timeout,
+            limit = limit,
+            filter = allowed_updates.join(",")
+        );
 
-    let resp = client.get(&url).send().await?;
-    let body = resp.json::<GetUpdates>().await?;
+        let resp = client.get(&url).send().await?;
+        let body = resp.json::<GetUpdates>().await?;
 
-    if !body.ok {
-        return Err("Telegram API returned ok=false".into());
+        if !body.ok {
+            return Err("Telegram API returned ok=false".into());
+        }
+
+        Ok(body.result)
     }
 
-    Ok(body.result)
-}
-
-async fn process_message(message: Message, pool: &SqlitePool) {
-    // TODO: реализовать обработку сообщения и работу с БД
-    info!(
-        "processing message {}: {:?}",
-        message.message_id, message.text
-    );
+    async fn process_message(message: Message, pool: &SqlitePool) {
+        // TODO: реализовать обработку сообщения и работу с БД
+        info!(
+            "processing message {}: {:?}",
+            message.message_id, message.text
+        );
+    }
 }
