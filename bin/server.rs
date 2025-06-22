@@ -1,7 +1,6 @@
 use clap::Parser;
 
-use tracing::trace;
-use tracing::{debug, info /* trace, warn, error */};
+use tracing::{info /* debug, trace, warn, error */};
 //use tracing_log::log;
 use std::sync::Arc;
 use tokio::sync::oneshot;
