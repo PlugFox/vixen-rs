@@ -66,3 +66,6 @@ tracing-log = "0.2.0"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3.15.0"

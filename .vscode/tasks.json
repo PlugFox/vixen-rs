@@ -183,6 +183,266 @@
             "problemMatcher": [
                 "$rustc"
             ]
+        },
+        {
+            "label": "test:all",
+            "detail": "Run all tests with output",
+            "icon": {
+                "color": "terminal.ansiGreen",
+                "id": "beaker"
+            },
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "--",
+                "--nocapture"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "RUST_LOG": "debug",
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "test:db:concurrency",
+            "detail": "Run database concurrency tests",
+            "icon": {
+                "color": "terminal.ansiRed",
+                "id": "database"
+            },
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "db::tests",
+                "--release",
+                "--",
+                "--nocapture"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "RUST_LOG": "debug",
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "test:stress",
+            "detail": "Run high contention stress test",
+            "icon": {
+                "color": "terminal.ansiYellow",
+                "id": "zap"
+            },
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "test_high_contention_stress",
+                "--release",
+                "--",
+                "--nocapture"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "RUST_LOG": "debug",
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "cargo:clippy",
+            "detail": "Run clippy linter",
+            "icon": {
+                "color": "terminal.ansiCyan",
+                "id": "tools"
+            },
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "clippy",
+                "--all-targets",
+                "--all-features"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            }
+        },
+        {
+            "label": "run:server:release",
+            "detail": "Run server in release mode",
+            "icon": {
+                "color": "terminal.ansiGreen",
+                "id": "rocket"
+            },
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--release",
+                "--bin",
+                "server"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "RUST_LOG": "info"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "isBackground": true,
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            }
+        },
+        {
+            "label": "dev:check",
+            "detail": "Quick development check: format, clippy, and test",
+            "icon": {
+                "color": "terminal.ansiMagenta",
+                "id": "checklist"
+            },
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-Command",
+                "cargo fmt; if ($LASTEXITCODE -eq 0) { cargo clippy --all-targets --all-features; if ($LASTEXITCODE -eq 0) { cargo test -- --nocapture } }"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "RUST_LOG": "debug",
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "run:server:debug",
+            "detail": "Run server in debug mode with hot reload",
+            "icon": {
+                "color": "terminal.ansiBlue",
+                "id": "debug-start"
+            },
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--bin",
+                "server"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "RUST_LOG": "debug",
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "isBackground": true,
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            }
         }
     ]
 }
