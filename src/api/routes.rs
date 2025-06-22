@@ -44,7 +44,7 @@ pub async fn get_health(State(db_pool): State<SqlitePool>) -> ApiResult<HealthSt
     }
 }
 
-// TODO(plugfox): Use `moka` or another LRU TTL cache for caching `get_about` and  `get_report` public endpoints
+// TODO(plugfox): Use `moka` or another LRU TTL cache for caching `get_about` and `get_report` public endpoints
 
 /// About handler
 /// Returns information about the application, such as version
