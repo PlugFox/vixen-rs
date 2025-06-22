@@ -1,4 +1,4 @@
-use crate::api::{api::ApiState, response::ApiResult};
+use crate::api::{server::ApiState, response::ApiResult};
 use axum::extract::{Path, State};
 use reqwest::StatusCode;
 use serde::Serialize;

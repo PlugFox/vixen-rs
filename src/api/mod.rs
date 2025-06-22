@@ -1,6 +1,7 @@
-mod api;
+mod server;
+
 mod middleware;
 mod response;
 mod routes;
 
-pub use api::start;
+pub use server::start;
