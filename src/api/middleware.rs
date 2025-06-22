@@ -7,7 +7,6 @@ use axum::{
 use futures::FutureExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;

@@ -2,11 +2,10 @@ use core::fmt;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json;
-use sqlx::SqlitePool;
 use std::{collections::HashSet, ops::Add, time::Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
-use crate::{config, db::DB};
+use crate::db::DB;
 
 #[derive(Debug, Deserialize)]
 struct User {
