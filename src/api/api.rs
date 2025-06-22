@@ -1,7 +1,17 @@
 use axum::middleware::from_fn_with_state;
 use axum::{
     Router,
+    middleware::from_fn,
     routing::{delete, get, put},
+};
+use std::time::Duration;
+use tower_http::{
+    compression::CompressionLayer,
+    cors::{Any, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    timeout::TimeoutLayer,
+    trace::TraceLayer,
 };
 
 use sqlx::SqlitePool;
@@ -70,7 +80,7 @@ pub async fn start(
         .route("/db", get(routes::admin_get_download_database))
         // --- Logs --- //
         .route("/logs", get(routes::admin_get_logs))
-        .route("/logs/:id", get(routes::admin_get_logs_by_id))
+        .route("/logs/{id}", get(routes::admin_get_logs_by_id))
         // --- Users --- //
         .route("/users/verified", get(routes::admin_get_users_verified))
         .route("/users/verified", put(routes::admin_put_users_verified))
@@ -88,7 +98,7 @@ pub async fn start(
         .route("/report", get(routes::admin_get_report))
         .route("/chart", get(routes::admin_get_chart))
         .route("/chart.png", get(routes::admin_get_chart_png))
-        .route("/summary/:cid", get(routes::admin_get_summary))
+        .route("/summary/{cid}", get(routes::admin_get_summary))
         // Apply the authentication middleware to all protected routes
         .layer(from_fn_with_state(private, middleware::auth_middleware));
 
@@ -96,7 +106,31 @@ pub async fn start(
         .merge(public_routes)
         .nest("/admin", protected_routes)
         .fallback(routes::not_found)
-        .with_state(pool);
+        .with_state(pool)
+        // Add global middleware layers
+        // This includes request ID handling, CORS, compression, request body limits,
+        // Add global middleware layers in correct order
+        .layer(from_fn(middleware::security_middleware))
+        .layer(from_fn(middleware::logging_middleware))
+        // Request ID for tracing and logging
+        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+        .layer(PropagateRequestIdLayer::x_request_id())
+        // Trace layer for logging request/response details
+        .layer(TraceLayer::new_for_http())
+        // CORS layer
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any)
+                .max_age(Duration::from_secs(3600)),
+        )
+        // Timeout for requests (30 seconds)
+        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        // Compression for responses
+        .layer(CompressionLayer::new())
+        // Limit request body size to 5 MB (should be innermost)
+        .layer(RequestBodyLimitLayer::new(5 * 1024 * 1024));
 
     // Listen on the specified address and handle incoming connections
     let listener = TcpListener::bind(&addr)
@@ -106,10 +140,14 @@ pub async fn start(
     info!(%addr, "Starting API server");
 
     // Start the server with graceful shutdown support
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal)
-        .await
-        .expect("API server crashed");
+    // Включаем поддержку ConnectInfo для получения IP адресов клиентов
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal)
+    .await
+    .expect("API server crashed");
 
     // Right after the server stops, we log that the server has stopped
     info!("API server stopped");
