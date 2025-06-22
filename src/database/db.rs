@@ -29,41 +29,38 @@ impl DB {
     }
 
     /// Execute a query that returns rows
-    pub async fn fetch_all<'q>(
+    pub async fn fetch_all(
         &self,
-        query: &'q str,
+        query: &str,
     ) -> Result<Vec<sqlx::sqlite::SqliteRow>, sqlx::Error> {
         sqlx::query(query).fetch_all(&self.pool).await
     }
 
     /// Execute a query that returns a single row
-    pub async fn fetch_one<'q>(
-        &self,
-        query: &'q str,
-    ) -> Result<sqlx::sqlite::SqliteRow, sqlx::Error> {
+    pub async fn fetch_one(&self, query: &str) -> Result<sqlx::sqlite::SqliteRow, sqlx::Error> {
         sqlx::query(query).fetch_one(&self.pool).await
     }
 
     /// Execute a query that returns an optional row
-    pub async fn fetch_optional<'q>(
+    pub async fn fetch_optional(
         &self,
-        query: &'q str,
+        query: &str,
     ) -> Result<Option<sqlx::sqlite::SqliteRow>, sqlx::Error> {
         sqlx::query(query).fetch_optional(&self.pool).await
     }
 
     /// Execute a query that doesn't return rows
-    pub async fn execute<'q>(
+    pub async fn execute(
         &self,
-        query: &'q str,
+        query: &str,
     ) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
         sqlx::query(query).execute(&self.pool).await
     }
 
     /// Execute a prepared query with parameters
-    pub async fn execute_with_params<'q>(
+    pub async fn execute_with_params<'a>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+        query: sqlx::query::Query<'a, sqlx::sqlite::Sqlite, sqlx::sqlite::SqliteArguments<'a>>,
     ) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
         query.execute(&self.pool).await
     }
