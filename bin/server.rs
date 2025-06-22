@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(config::Config::parse());
     init_logging(&config);
 
-    info!("Starting Vixen Service");
+    info!("starting Vixen Service");
     /* debug!(
         "Configuration:\n  Environment: {env}\n  Address: {address}\n  Log Level: {log_level}",
         env = config.environment.as_deref().unwrap_or("production"),
@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Make copies of the pool for API and Telegram services
         (api_db, bot_db) = {
-            let pool = db::init_db_pool(&config.database).await?;
+            let pool = db::DB::connect(&config.database).await?;
             (pool.clone(), pool.clone())
         };
     }
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::signal::ctrl_c()
             .await
             .expect("failed to listen for shutdown");
-        tracing::info!("Shutdown signal received");
+        tracing::info!("shutdown signal received");
     }
 
     // Notify services to stop

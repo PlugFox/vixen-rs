@@ -14,28 +14,35 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::api::{middleware, routes};
 use crate::config;
+use crate::db::DB;
+
+#[derive(Clone)]
+pub struct ApiState {
+    pub db: DB,
+}
 
 /// Run the HTTP API server with graceful shutdown
 pub async fn start(
     conf: &config::Config,
-    pool: SqlitePool,
+    db: DB,
     shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
     // Try to parse the address from the configuration
-    let addr: SocketAddr = conf.address.parse().expect("Invalid address format");
+    let addr: SocketAddr = conf.address.parse().expect("invalid address format");
 
     // Initialize the private scope for authentication middleware
     // This scope contains the secret used for authentication
     let private = middleware::AdminScope {
         secret: conf.secret.clone(),
     };
+
+    let state = ApiState { db: db.clone() };
 
     // Initialize rate limiting state (100 requests per minute per IP)
     let rate_limit_state = middleware::RateLimitState::new(100, 60);
@@ -63,7 +70,7 @@ pub async fn start(
     ..get('/admin/summary/<cid>', $GET$Admin$Summary) */
 
     // Public routes without authentication
-    let public_routes = Router::new()
+    let public_routes: Router<ApiState> = Router::new()
         // --- Meta --- //
         .route("/report", get(routes::get_report))
         .route("/health", get(routes::get_health))
@@ -74,7 +81,7 @@ pub async fn start(
         .route("/404", get(routes::not_found));
 
     // Private routes that require authentication
-    let protected_routes = Router::new()
+    let protected_routes: Router<ApiState> = Router::new()
         // --- Database --- //
         .route("/download", get(routes::admin_get_download_database))
         .route("/database", get(routes::admin_get_download_database))
@@ -109,8 +116,8 @@ pub async fn start(
         .merge(public_routes)
         .nest("/admin", protected_routes)
         .fallback(routes::not_found)
-        // Inject the database connection pool into the application state
-        .with_state(pool)
+        // Inject the API state into the application
+        .with_state(state)
         // Add global middleware layers in correct order (innermost to outermost)
         // Panic recovery should be outermost to catch any panics
         .layer(from_fn(middleware::panic_recovery_middleware))
@@ -151,9 +158,9 @@ pub async fn start(
     // Listen on the specified address and handle incoming connections
     let listener = TcpListener::bind(&addr)
         .await
-        .expect("Failed to bind to address");
+        .expect("failed to bind to address");
 
-    info!(%addr, "Starting API server");
+    info!(%addr, "Starting api server");
 
     // Start the server with graceful shutdown support
     // Включаем поддержку ConnectInfo для получения IP адресов клиентов
@@ -163,8 +170,8 @@ pub async fn start(
     )
     .with_graceful_shutdown(shutdown_signal)
     .await
-    .expect("API server crashed");
+    .expect("api server crashed");
 
     // Right after the server stops, we log that the server has stopped
-    info!("API server stopped");
+    info!("api server stopped");
 }

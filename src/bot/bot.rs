@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use std::{collections::HashSet, ops::Add, time::Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::config;
+use crate::{config, db::DB};
 
 #[derive(Debug, Deserialize)]
 struct User {
@@ -167,13 +167,13 @@ struct GetUpdates {
 }
 
 pub struct Bot {
-    db: SqlitePool,
+    db: DB,
     token: String,
     chats: HashSet<i64>,
 }
 
 impl Bot {
-    pub fn new(token: &str, chats: &[String], db: SqlitePool) -> Self {
+    pub fn new(token: &str, chats: &[String], db: DB) -> Self {
         let chats_set: HashSet<i64> = chats
             .iter()
             .filter_map(|chat| chat.parse::<i64>().ok())
@@ -201,7 +201,7 @@ impl Bot {
         let token: &str = &self.token;
         let chats: HashSet<i64> = self.chats.clone();
         let has_chats = !chats.is_empty();
-        let pool: SqlitePool = self.db.clone();
+        let pool: &DB = &self.db;
 
         tokio::pin!(shutdown_signal);
 
@@ -235,7 +235,7 @@ impl Bot {
                                     }
 
                                     info!("processing message from chat#{}", message.chat.id);
-                                    Self::process_message(message, &pool).await;
+                                    Self::process_message(message, pool).await;
                                 }
                             }
                         }
@@ -285,7 +285,7 @@ impl Bot {
         Ok(body.result)
     }
 
-    async fn process_message(message: Message, pool: &SqlitePool) {
+    async fn process_message(message: Message, pool: &DB) {
         // TODO: реализовать обработку сообщения и работу с БД
         info!(
             "processing message {}: {:?}",

@@ -214,7 +214,7 @@ pub async fn panic_recovery_middleware(request: Request, next: Next) -> Response
                 "Unknown panic occurred".to_string()
             };
 
-            error!("Panic occurred in request handler: {}", panic_message);
+            error!("panic occurred in request handler: {}", panic_message);
 
             // Создаем стандартный error response
             let error_response = ApiResult::<()>::error_with_status(

@@ -1,9 +1,8 @@
-use crate::api::response::ApiResult;
-use axum::extract::State;
+use crate::api::{api::ApiState, response::ApiResult};
+use axum::extract::{Path, State};
 use reqwest::StatusCode;
 use serde::Serialize;
-use sqlx::SqlitePool;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 #[derive(Serialize)]
 pub struct HealthStatus {
@@ -13,34 +12,25 @@ pub struct HealthStatus {
 
 /// Health-check handler
 /// Checks the health of the application and the database connection
-pub async fn get_health(State(db_pool): State<SqlitePool>) -> ApiResult<HealthStatus> {
-    let row: (i32,) = match sqlx::query_as("SELECT 1 AS health")
-        .fetch_one(&db_pool)
-        .await
-    {
-        Ok(row) => row,
-        Err(_) => {
-            // Return 500 Internal Server Error if the database connection fails
-            error!("Database connection failed");
-            return ApiResult::error_with_status(
-                "DATABASE_ERROR",
-                "Database connection failed",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-
-    if row.0 == 1 {
-        ApiResult::success(HealthStatus {
+pub async fn get_health(State(state): State<ApiState>) -> ApiResult<HealthStatus> {
+    match state.db.health_check().await {
+        Ok(true) => ApiResult::success(HealthStatus {
             status: "OK".to_string(),
             database: "Connected".to_string(),
-        })
-    } else {
-        ApiResult::error_with_status(
+        }),
+        Ok(false) => ApiResult::error_with_status(
             "DATABASE_ERROR",
             "Database health check failed",
             StatusCode::INTERNAL_SERVER_ERROR,
-        )
+        ),
+        Err(e) => {
+            error!("database connection failed: {}", e);
+            ApiResult::error_with_status(
+                "DATABASE_ERROR",
+                "Database connection failed",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
     }
 }
 
@@ -71,7 +61,7 @@ pub async fn not_found() -> ApiResult<()> {
 }
 
 /// Пример обработчика для скачивания файла
-pub async fn admin_get_download_database(State(db_pool): State<SqlitePool>) -> ApiResult<()> {
+pub async fn admin_get_download_database(State(_state): State<ApiState>) -> ApiResult<()> {
     // Здесь логика для создания резервной копии БД
     let backup_data = vec![1, 2, 3, 4, 5]; // Заглушка
 
@@ -91,13 +81,13 @@ pub async fn admin_get_logs() -> ApiResult<String> {
 
 /// Read logs by ID from the database
 pub async fn admin_get_logs_by_id(
-    State(db_pool): State<SqlitePool>,
-    id: String,
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
 ) -> ApiResult<String> {
-    debug!("Fetching log with ID: {}", id);
-    let log = sqlx::query_scalar("SELECT log FROM logs WHERE id = ?")
+    debug!("fetching log with ID: {}", id);
+    let log = sqlx::query_scalar::<_, String>("SELECT log FROM logs WHERE id = ?")
         .bind(&id)
-        .fetch_one(&db_pool)
+        .fetch_optional(state.db.get_pool())
         .await;
     match log {
         Ok(Some(log)) => ApiResult::success(log),
@@ -105,7 +95,7 @@ pub async fn admin_get_logs_by_id(
             ApiResult::error_with_status("LOG_NOT_FOUND", "Log not found", StatusCode::NOT_FOUND)
         }
         Err(e) => {
-            error!("Error fetching log: {}", e);
+            error!("error fetching log: {}", e);
             ApiResult::error_with_status(
                 "DATABASE_ERROR",
                 "Failed to fetch log from database",
@@ -122,10 +112,10 @@ pub async fn admin_get_users_verified() -> ApiResult<String> {
     ApiResult::success(users)
 }
 
-pub async fn admin_put_users_verified(State(db_pool): State<SqlitePool>) -> ApiResult<()> {
+pub async fn admin_put_users_verified(State(state): State<ApiState>) -> ApiResult<()> {
     // Здесь логика для обновления статуса пользователей
     let updated = sqlx::query("UPDATE users SET verified = 1 WHERE id = 1")
-        .execute(&db_pool)
+        .execute(state.db.get_pool())
         .await;
     match updated {
         Ok(result) => {
@@ -140,7 +130,7 @@ pub async fn admin_put_users_verified(State(db_pool): State<SqlitePool>) -> ApiR
             }
         }
         Err(e) => {
-            error!("Error updating users: {}", e);
+            error!("error updating users: {}", e);
             ApiResult::error_with_status(
                 "DATABASE_ERROR",
                 "Failed to update users in database",
@@ -150,10 +140,10 @@ pub async fn admin_put_users_verified(State(db_pool): State<SqlitePool>) -> ApiR
     }
 }
 
-pub async fn admin_delete_verified_users(State(db_pool): State<SqlitePool>) -> ApiResult<()> {
+pub async fn admin_delete_verified_users(State(state): State<ApiState>) -> ApiResult<()> {
     // Здесь логика для удаления проверенных пользователей
     let deleted = sqlx::query("DELETE FROM users WHERE verified = 1")
-        .execute(&db_pool)
+        .execute(state.db.get_pool())
         .await;
     match deleted {
         Ok(result) => {
@@ -168,7 +158,7 @@ pub async fn admin_delete_verified_users(State(db_pool): State<SqlitePool>) -> A
             }
         }
         Err(e) => {
-            error!("Error deleting verified users: {}", e);
+            error!("error deleting verified users: {}", e);
             ApiResult::error_with_status(
                 "DATABASE_ERROR",
                 "Failed to delete verified users from database",
@@ -209,13 +199,13 @@ pub async fn admin_get_chart_png() -> ApiResult<()> {
 }
 
 pub async fn admin_get_summary(
-    State(db_pool): State<SqlitePool>,
-    cid: String,
+    State(state): State<ApiState>,
+    Path(cid): Path<String>,
 ) -> ApiResult<String> {
     // Здесь логика для получения сводки по cid
-    let summary = sqlx::query_scalar("SELECT summary FROM summaries WHERE cid = ?")
+    let summary = sqlx::query_scalar::<_, String>("SELECT summary FROM summaries WHERE cid = ?")
         .bind(&cid)
-        .fetch_one(&db_pool)
+        .fetch_optional(state.db.get_pool())
         .await;
 
     match summary {
@@ -226,7 +216,7 @@ pub async fn admin_get_summary(
             StatusCode::NOT_FOUND,
         ),
         Err(e) => {
-            error!("Error fetching summary: {}", e);
+            error!("error fetching summary: {}", e);
             ApiResult::error_with_status(
                 "DATABASE_ERROR",
                 "Failed to fetch summary from database",
