@@ -142,7 +142,32 @@
             "label": "cargo:format",
             "detail": "Format Rust using cargo fmt.",
             "type": "shell",
-            "command": "cargo fmt",
+            "command": "cargo",
+            "args": [
+                "fmt",
+                "--all",
+                "--",
+                "--check"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "none",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo:fix",
+            "detail": "Fix Rust code using cargo fix.",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "fix",
+                "--allow-dirty",
+                "--allow-staged"
+            ],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
