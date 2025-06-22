@@ -6,6 +6,11 @@ authors = ["Mike Matiunin <plugfox@gmail.com>"]
 license = "MIT"
 edition = "2024"
 
+# Настройки линтера для всего проекта
+[lints.rust]
+dead_code = "allow"
+unused_variables = "allow"
+
 # Start server and telegram bot,
 # this is the main entry point of the application.
 # cargo run --release --bin server
@@ -43,15 +48,27 @@ serde_json = "1.0.140"
 clap = { version = "4.5.40", features = ["derive", "env"] }
 
 # Database
-sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-native-tls", "migrate"] }
+sqlx = { version = "0.8.6", features = [
+    "sqlite",
+    "runtime-tokio-native-tls",
+    "migrate",
+] }
 
 # HTTP client (for Telegram Bot API polling)
-reqwest = {version = "0.12.20", features = ["json"]}
+reqwest = { version = "0.12.20", features = ["json"] }
 
 # HTTP server (for API)
 axum = "0.8.4"
 tower = "0.5.2"
-tower-http = { version = "0.6.6", features = ["cors", "trace", "limit", "request-id", "util", "timeout", "compression-full"] }
+tower-http = { version = "0.6.6", features = [
+    "cors",
+    "trace",
+    "limit",
+    "request-id",
+    "util",
+    "timeout",
+    "compression-full",
+] }
 
 # Captcha image generation
 image = { version = "0.25.6", features = ["webp"] }
@@ -60,7 +77,11 @@ rand = "0.9.1"
 
 # Logging
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
+tracing-subscriber = { version = "0.3.19", features = [
+    "env-filter",
+    "fmt",
+    "json",
+] }
 tracing-appender = "0.2.3"
 tracing-log = "0.2.0"
 

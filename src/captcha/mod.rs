@@ -373,6 +373,7 @@ impl CaptchaService {
     }
 
     /// Draw a thick line using Bresenham's algorithm
+    #[allow(clippy::too_many_arguments)]
     fn draw_thick_line(
         &self,
         img: &mut RgbaImage,
@@ -419,6 +420,7 @@ impl CaptchaService {
     }
 
     /// Draw rotated character
+    #[allow(clippy::too_many_arguments)]
     fn draw_rotated_char(
         &self,
         img: &mut RgbaImage,

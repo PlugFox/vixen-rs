@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod database_tests {
     use crate::database::DB;
 
     //use super::*;
