@@ -37,6 +37,9 @@ pub async fn start(
         secret: conf.secret.clone(),
     };
 
+    // Initialize rate limiting state (100 requests per minute per IP)
+    let rate_limit_state = middleware::RateLimitState::new(100, 60);
+
     /* // --- Meta --- //
     ..get('/<ignored|health|healthz|status>', $GET$HealthCheck)
     ..get('/<ignored|about|version>', $GET$About)
@@ -106,14 +109,27 @@ pub async fn start(
         .merge(public_routes)
         .nest("/admin", protected_routes)
         .fallback(routes::not_found)
+        // Inject the database connection pool into the application state
         .with_state(pool)
-        // Add global middleware layers
-        // This includes request ID handling, CORS, compression, request body limits,
-        // Add global middleware layers in correct order
+        // Add global middleware layers in correct order (innermost to outermost)
+        // Panic recovery should be outermost to catch any panics
+        .layer(from_fn(middleware::panic_recovery_middleware))
+        // Metrics middleware to add performance headers
+        .layer(from_fn(middleware::metrics_middleware))
+        // Security headers
         .layer(from_fn(middleware::security_middleware))
+        // Custom logging with IP detection
         .layer(from_fn(middleware::logging_middleware))
+        // Rate limiting (requires ConnectInfo)
+        .layer(from_fn_with_state(
+            rate_limit_state,
+            middleware::rate_limit_middleware,
+        ))
+        // Request validation
+        .layer(from_fn(middleware::request_validation_middleware))
         // Request ID for tracing and logging
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+        // Propagate the request ID to downstream services
         .layer(PropagateRequestIdLayer::x_request_id())
         // Trace layer for logging request/response details
         .layer(TraceLayer::new_for_http())
