@@ -44,12 +44,21 @@ pub async fn get_health(State(db_pool): State<SqlitePool>) -> ApiResult<HealthSt
     }
 }
 
+// TODO(plugfox): Use `moka` or another LRU TTL cache for caching `get_about` and  `get_report` public endpoints
+
 /// About handler
 /// Returns information about the application, such as version
 pub async fn get_about() -> ApiResult<String> {
     // Здесь можно добавить информацию о приложении, например, версию
     let version = env!("CARGO_PKG_VERSION");
     ApiResult::success(format!("Application version: {}", version))
+}
+
+/// Get report for last 24 hours
+pub async fn get_report() -> ApiResult<String> {
+    // Здесь логика для получения отчета
+    let report = "This is a placeholder for the report".to_string();
+    ApiResult::success(report)
 }
 
 /// Fallback handler for 404 Not Found
@@ -179,12 +188,6 @@ pub async fn admin_get_messages_deleted_hash() -> ApiResult<String> {
     // Здесь логика для получения хэша удаленных сообщений
     let hash = "This is a placeholder for deleted messages hash".to_string();
     ApiResult::success(hash)
-}
-
-pub async fn get_report() -> ApiResult<String> {
-    // Здесь логика для получения отчета
-    let report = "This is a placeholder for the report".to_string();
-    ApiResult::success(report)
 }
 
 pub async fn admin_get_report() -> ApiResult<String> {
