@@ -1,5 +1,6 @@
 use clap::Parser;
 
+use tracing::trace;
 use tracing::{debug, info /* trace, warn, error */};
 //use tracing_log::log;
 use std::sync::Arc;
@@ -18,24 +19,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(config::Config::parse());
     init_logging(&config);
 
-    info!("Starting Telegram Bot Server...");
-    debug!(
+    info!("Starting Vixen Service");
+    /* debug!(
         "Configuration:\n  Environment: {env}\n  Address: {address}\n  Log Level: {log_level}",
         env = config.environment.as_deref().unwrap_or("production"),
         address = config.address,
         log_level = config.log_level,
-    );
+    ); */
 
     // Initialize database pool
     let (api_db, bot_db);
     {
-        let db_pool = db::init_db_pool(&config.database).await?;
         // Make copies of the pool for API and Telegram services
         (api_db, bot_db) = {
             let pool = db::init_db_pool(&config.database).await?;
             (pool.clone(), pool.clone())
         };
-        drop(db_pool); // Drop the original pool to avoid holding onto it unnecessarily
     }
 
     // Channels for graceful shutdowns

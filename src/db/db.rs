@@ -1,6 +1,6 @@
 use anyhow::Result;
 use sqlx::{SqlitePool, migrate::MigrateDatabase, sqlite::SqlitePoolOptions};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 use tracing::{debug, error, info, warn};
 
 /// Ensure directory exists for database file
@@ -34,7 +34,8 @@ pub async fn init_db_pool(database_url: &str) -> Result<SqlitePool> {
     // Create the connection pool with a maximum of 5 connections
     debug!("Connecting to database at: {}", database_url);
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
         .connect(database_url)
         .await?;
 
