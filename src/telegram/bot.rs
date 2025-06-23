@@ -76,6 +76,9 @@ struct Message {
     // Optional. Sender of the message; may be empty for messages sent to channels
     from: Option<User>,
 
+    // Optional. For replies in the same chat and message thread, the original message.
+    reply_to_message: Option<Box<Message>>,
+
     // Optional. For text messages, the actual UTF-8 text of the message
     text: Option<String>,
 
