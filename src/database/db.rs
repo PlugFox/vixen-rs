@@ -153,7 +153,13 @@ async fn init_db_pool(database_url: &str) -> Result<SqlitePool> {
 
     // Run migrations
     info!("running database migrations");
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    match sqlx::migrate!("./migrations").run(&pool).await {
+        Ok(_) => debug!("database migrations completed successfully"),
+        Err(e) => {
+            error!("failed to run database migrations: {}", e);
+            return Err(e.into());
+        }
+    }
 
     // VACUUM the database to optimize it
     debug!("running VACUUM on the database to optimize it");
