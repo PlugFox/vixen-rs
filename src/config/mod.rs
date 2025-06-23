@@ -1,5 +1,32 @@
 use clap::Parser;
 
+/// Name of the application
+pub const NAME: &str = env!("CARGO_PKG_NAME");
+
+/// Version of the application
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Author of the application
+pub const AUTHOR: &str = env!("CARGO_PKG_AUTHORS");
+
+/// Description of the application
+pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
+
+/// License of the application
+pub const LICENSE: &str = env!("CARGO_PKG_LICENSE");
+
+/// Homepage URL of the application
+pub const HOMEPAGE: &str = env!("CARGO_PKG_HOMEPAGE");
+
+/// Repository URL of the application
+pub const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+
+/// Is the application running in development mode?
+#[cfg(debug_assertions)]
+pub const IS_DEV: bool = true;
+#[cfg(not(debug_assertions))]
+pub const IS_DEV: bool = false;
+
 /// Application settings loaded from environment or CLI args
 #[derive(Parser, Debug, Clone)]
 #[command(

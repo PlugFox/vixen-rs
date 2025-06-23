@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.environment.as_deref().unwrap_or("production"),
     );
 
-    info!("Starting Vixen Service");
+    info!("Starting Vixen Service v{}", config::VERSION);
     /* debug!(
         "Configuration:\n  Environment: {env}\n  Address: {address}\n  Log Level: {log_level}",
         env = config.environment.as_deref().unwrap_or("production"),
