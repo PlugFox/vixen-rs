@@ -206,10 +206,10 @@ CREATE TABLE messages_captcha (
     expires_at INTEGER NOT NULL,
 
     -- Creation timestamp
-    created_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
 
     -- Last update timestamp
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')) CHECK(updated_at >= created_at)
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX IF NOT EXISTS messages_captcha_user_id_idx ON messages_captcha (user_id);

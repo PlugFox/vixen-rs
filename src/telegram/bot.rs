@@ -6,10 +6,7 @@ use serde_json;
 use std::{collections::HashSet, ops::Add, time::Duration};
 use tracing::{debug, error, info};
 
-use crate::{
-    captcha::{Captcha, CaptchaService},
-    database::DB,
-};
+use crate::{captcha::CaptchaService, database::DB};
 
 #[derive(Debug, Deserialize)]
 pub struct User {
@@ -984,21 +981,38 @@ impl Bot {
             let captcha = service.generate().await;
 
             let verification_message = format!(
-                r"👋 Hello *{}* \[`{}`\] !\n\nPlease solve the _following captcha_ to start chatting\:",
+                "👋 Hello *{}* \\[`{}`\\] \\!\n\nPlease solve the _following captcha_ to start chatting\\.",
                 Self::user_display_name(user),
                 user_id,
             );
 
-            self.send_photo(
+            let captcha_message_id = self
+                .send_photo(
+                    chat_id,
+                    captcha.bytes,
+                    "captcha.webp",
+                    Some(&verification_message),
+                    false,                             // disable notification
+                    Some(&*KB_CAPTCHA_MARKUP_ENCODED), // captcha keyboard markup
+                )
+                .await
+                .expect("failed to send verification photo");
+
+            db.upsert_captcha(
                 chat_id,
-                captcha.bytes,
-                "captcha.webp",
-                Some(&verification_message),
-                false,                             // disable notification
-                Some(&*KB_CAPTCHA_MARKUP_ENCODED), // captcha keyboard markup
+                user_id,
+                captcha_message_id,
+                &verification_message,
+                &captcha.text,
+                "",
+                chrono::Utc::now()
+                    .add(chrono::Duration::minutes(5))
+                    .timestamp(),
             )
             .await
-            .expect("failed to send verification photo");
+            .unwrap_or_else(|e| {
+                error!("failed to upsert captcha for user {}: {}", user.id, e);
+            });
         }
 
         // Send verification message to the user

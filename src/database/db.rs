@@ -331,6 +331,47 @@ impl DB {
         tx.commit().await?;
         Ok(())
     }
+
+    /// Upsert a captcha into the database
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_captcha(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        message_id: i64,
+        caption: &str,
+        solution: &str,
+        input: &str,
+        expires_at: i64,
+    ) -> Result<()> {
+        // Upsert the captcha into the database
+        sqlx::query(&normalize_sql_query(
+            r#"
+        |INSERT INTO messages_captcha (message_id, chat_id, user_id, caption, solution, input, expires_at, updated_at)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        |ON CONFLICT(message_id) DO UPDATE SET
+        |    chat_id = excluded.chat_id,
+        |    user_id = excluded.user_id,
+        |    caption = excluded.caption,
+        |    solution = excluded.solution,
+        |    input = excluded.input,
+        |    expires_at = excluded.expires_at,
+        |    updated_at = excluded.updated_at;
+        "#,
+        ))
+        .bind(message_id)
+        .bind(chat_id)
+        .bind(user_id)
+        .bind(caption)
+        .bind(solution)
+        .bind(input)
+        .bind(expires_at)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await.expect("failed to upsert captcha to the database");
+
+        Ok(())
+    }
 }
 
 /// Initialize the SQLite connection pool
