@@ -188,6 +188,49 @@ impl DB {
         Ok(())
     }
 
+    /// Ban a user by inserting into the banned users table
+    pub async fn ban_user(
+        &self,
+        user_id: i64,
+        chat_id: i64,
+        reason: &str,
+        expires_at: Option<i64>,
+    ) -> Result<()> {
+        // Start transaction
+        let mut tx = self.begin().await?;
+
+        // Insert the user into the banned users table
+        sqlx::query(&normalize_sql_query(
+            r#"
+        |INSERT INTO users_banned (user_id, chat_id, banned_at, expires_at, reason)
+        |VALUES (?, ?, strftime('%s', 'now'), ?, ?);
+        |-- If the user is already banned, update the expiration and reason
+        |ON CONFLICT(user_id) DO UPDATE SET
+        |    chat_id = excluded.chat_id,
+        |    banned_at = strftime('%s', 'now'),
+        |    expires_at = excluded.expires_at,
+        |    reason = excluded.reason;
+        |
+        |-- Remove from verified users if they were verified
+        |DELETE FROM users_verified WHERE user_id = ?;
+        "#,
+        ))
+        .bind(user_id)
+        .bind(chat_id)
+        .bind(expires_at)
+        .bind(reason)
+        .execute(&mut *tx)
+        .await?;
+
+        // Remove from verified users if they were verified
+        let mut write = self.users_verified.write().await;
+        write.remove(&user_id);
+
+        // Commit transaction
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Upsert a message and an user to the database in a single transaction using batch operations
     pub async fn upsert_message(&self, message: &telegram::Message) -> Result<()> {
         let mut tx = self.begin().await?;

@@ -188,6 +188,7 @@ pub struct Bot {
     chats: HashSet<i64>,
 }
 
+/// A Telegram Bot API client
 impl Bot {
     pub fn new(token: String, chats: Vec<String>, db: DB) -> Self {
         let chats_set: HashSet<i64> = chats
@@ -322,6 +323,8 @@ impl Bot {
         let resp = self
             .client
             .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
             .json(&payload)
             .timeout(Duration::from_secs(12))
             .send()
@@ -416,6 +419,8 @@ impl Bot {
         let resp = self
             .client
             .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
             .json(&payload)
             .timeout(Duration::from_secs(10))
             .send()
@@ -447,6 +452,37 @@ impl Bot {
             }
             _ => Err("malformed response".into()),
         }
+    }
+
+    /// Ban a user from the chat
+    pub async fn ban_user(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        until_date: Option<i64>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("https://api.telegram.org/bot{}/banChatMember", self.token);
+
+        let mut payload = serde_json::json!({
+            "chat_id": chat_id,
+            "user_id": user_id,
+        });
+
+        if let Some(date) = until_date {
+            payload["until_date"] = serde_json::Value::Number(date.into());
+        }
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .json(&payload)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+
+        Ok(())
     }
 
     /// Long-poll Telegram updates, stop on shutdown signal
@@ -648,6 +684,8 @@ impl Bot {
 
         let user = user.unwrap();
         let user_id = user.id;
+        let chat_id = message.chat.id;
+        let message_id = message.message_id;
         debug!("checking user {} in database", user.id);
         match db.is_user_verified(user_id).await {
             true => {
@@ -660,13 +698,50 @@ impl Bot {
             }
         }
 
-        let _message_type = message.metadata().message_type;
+        let message_type = message.metadata().message_type;
         let verification_message = Self::format_message_with_user(
             user,
             "Please verify your identity to use this bot. You can do this by sending a verification code or following the instructions provided.",
         );
 
-        self.send_text_message(message.chat.id, &verification_message)
+        self.delete_message(chat_id, message_id).await.ok();
+
+        static VERY_BAD_TYPES: once_cell::sync::Lazy<HashSet<&'static str>> =
+            once_cell::sync::Lazy::new(|| {
+                let mut set = HashSet::new();
+                set.insert("video");
+                set.insert("audio");
+                set.insert("voice");
+                set.insert("video_note");
+                set.insert("story");
+                set
+            });
+
+        // Check if the message type is one of the very bad types
+        if VERY_BAD_TYPES.contains(message_type) {
+            // If the message is a media type that requires verification, ban the user
+            db.ban_user(user_id, chat_id, "Send bad type of message", None)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("failed to ban user {}: {}", user.id, e);
+                });
+
+            self.ban_user(chat_id, user_id, None)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("failed to ban user {}: {}", user.id, e);
+                });
+
+            info!(
+                "banned user {} for sending unsupported message type: {}",
+                user.id, message_type
+            );
+
+            return;
+        }
+
+        // Send verification message to the user
+        self.send_text_message(chat_id, &verification_message)
             .await
             .unwrap_or_else(|e| {
                 error!(
@@ -728,15 +803,16 @@ impl Message {
                 &self.voice,
                 &self.video_note,
                 &self.game,
+                &self.story,
             ) {
                 // Text message
-                (Some(text), None, None, None, None, None, None, None, None, None) => Meta {
+                (Some(text), None, None, None, None, None, None, None, None, None, None) => Meta {
                     message_type: "text",
                     content: text.clone(),
                     length: text.len() as i32,
                 },
                 // Media with possible caption
-                (_, Some(_), _, _, _, _, _, _, _, _) => {
+                (_, Some(_), _, _, _, _, _, _, _, _, _) => {
                     let caption = self.caption.clone().unwrap_or_default();
                     Meta {
                         message_type: "photo",
@@ -744,7 +820,7 @@ impl Message {
                         length: caption.len() as i32,
                     }
                 }
-                (_, _, Some(_), _, _, _, _, _, _, _) => {
+                (_, _, Some(_), _, _, _, _, _, _, _, _) => {
                     let caption = self.caption.clone().unwrap_or_default();
                     Meta {
                         message_type: "video",
@@ -752,7 +828,7 @@ impl Message {
                         length: caption.len() as i32,
                     }
                 }
-                (_, _, _, Some(_), _, _, _, _, _, _) => {
+                (_, _, _, Some(_), _, _, _, _, _, _, _) => {
                     let caption = self.caption.clone().unwrap_or_default();
                     Meta {
                         message_type: "audio",
@@ -760,7 +836,7 @@ impl Message {
                         length: caption.len() as i32,
                     }
                 }
-                (_, _, _, _, Some(_), _, _, _, _, _) => {
+                (_, _, _, _, Some(_), _, _, _, _, _, _) => {
                     let caption = self.caption.clone().unwrap_or_default();
                     Meta {
                         message_type: "document",
@@ -768,12 +844,12 @@ impl Message {
                         length: caption.len() as i32,
                     }
                 }
-                (_, _, _, _, _, Some(_), _, _, _, _) => Meta {
+                (_, _, _, _, _, Some(_), _, _, _, _, _) => Meta {
                     message_type: "sticker",
                     content: String::new(),
                     length: 0,
                 },
-                (_, _, _, _, _, _, Some(_), _, _, _) => {
+                (_, _, _, _, _, _, Some(_), _, _, _, _) => {
                     let caption = self.caption.clone().unwrap_or_default();
                     Meta {
                         message_type: "animation",
@@ -781,7 +857,7 @@ impl Message {
                         length: caption.len() as i32,
                     }
                 }
-                (_, _, _, _, _, _, _, Some(_), _, _) => {
+                (_, _, _, _, _, _, _, Some(_), _, _, _) => {
                     let caption = self.caption.clone().unwrap_or_default();
                     Meta {
                         message_type: "voice",
@@ -789,13 +865,18 @@ impl Message {
                         length: caption.len() as i32,
                     }
                 }
-                (_, _, _, _, _, _, _, _, Some(_), _) => Meta {
+                (_, _, _, _, _, _, _, _, Some(_), _, _) => Meta {
                     message_type: "video_note",
                     content: String::new(),
                     length: 0,
                 },
-                (_, _, _, _, _, _, _, _, _, Some(_)) => Meta {
+                (_, _, _, _, _, _, _, _, _, Some(_), _) => Meta {
                     message_type: "game",
+                    content: String::new(),
+                    length: 0,
+                },
+                (_, _, _, _, _, _, _, _, _, _, Some(_)) => Meta {
+                    message_type: "story",
                     content: String::new(),
                     length: 0,
                 },
