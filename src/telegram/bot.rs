@@ -182,6 +182,7 @@ struct GetUpdates {
 
 pub struct Bot {
     db: DB,
+    client: Client,
     token: String,
     chats: HashSet<i64>,
 }
@@ -194,8 +195,256 @@ impl Bot {
             .collect();
         Bot {
             db,
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .pool_idle_timeout(Duration::from_secs(60))
+                .pool_max_idle_per_host(10)
+                .build()
+                .expect("failed to build HTTP client"),
             token: token.to_string(),
             chats: chats_set,
+        }
+    }
+
+    /// Escape special characters in a MarkdownV2 string
+    pub fn escape_markdown_v2(text: &str) -> String {
+        if text.is_empty() {
+            return String::new();
+        }
+
+        const SPECIAL_CHARS: &str = r"_*\[]()~`>#+\-=|{}.!";
+        let mut buffer = String::with_capacity(text.len() * 2); // Pre-allocate for better performance
+
+        for ch in text.chars() {
+            if SPECIAL_CHARS.contains(ch) {
+                buffer.push('\\');
+            }
+            buffer.push(ch);
+        }
+
+        buffer
+    }
+
+    /// Format a user mention as a MarkdownV2 link
+    pub fn user_mention(uid: i64, username: &str) -> String {
+        format!(
+            "[{}](tg://user?id={})",
+            Self::escape_markdown_v2(username),
+            uid
+        )
+    }
+
+    /// Get the short ID of a user or chat
+    /// Converts Telegram's full chat ID to a shorter representation
+    pub fn short_id(cid: i64) -> i64 {
+        cid.abs() - 1000000000000
+    }
+
+    /// Format a chat mention with its title
+    pub fn chat_mention(chat: &Chat) -> String {
+        match &chat.title {
+            Some(title) => Self::escape_markdown_v2(title),
+            None => match &chat.username {
+                Some(username) => format!("@{}", Self::escape_markdown_v2(username)),
+                None => format!("Chat {}", Self::short_id(chat.id)),
+            },
+        }
+    }
+
+    /// Format a user's display name safely for MarkdownV2
+    pub fn user_display_name(user: &User) -> String {
+        let mut name = Self::escape_markdown_v2(&user.first_name);
+
+        if let Some(ref last_name) = user.last_name {
+            if !last_name.is_empty() {
+                name.push(' ');
+                name.push_str(&Self::escape_markdown_v2(last_name));
+            }
+        }
+
+        name
+    }
+
+    /// Create a formatted message with user mention
+    pub fn format_message_with_user(user: &User, message: &str) -> String {
+        let user_mention = Self::user_mention(user.id, &Self::user_display_name(user));
+        format!("{}, {}", user_mention, Self::escape_markdown_v2(message))
+    }
+
+    /// Send a formatted message with error handling and retries
+    pub async fn send_formatted_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+        disable_notification: bool,
+        protect_content: bool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.send_message_with_options(
+            chat_id,
+            text,
+            Some("MarkdownV2"),
+            disable_notification,
+            protect_content,
+            None,
+        )
+        .await
+    }
+
+    /// Send a message with full options support
+    pub async fn send_message_with_options(
+        &self,
+        chat_id: i64,
+        text: &str,
+        parse_mode: Option<&str>,
+        disable_notification: bool,
+        protect_content: bool,
+        reply_to_message_id: Option<i64>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.token);
+
+        let mut payload = serde_json::json!({
+            "chat_id": chat_id,
+            "text": text,
+            "disable_notification": disable_notification,
+            "protect_content": protect_content,
+        });
+
+        if let Some(mode) = parse_mode {
+            payload["parse_mode"] = serde_json::Value::String(mode.to_string());
+        }
+
+        if let Some(reply_id) = reply_to_message_id {
+            payload["reply_to_message_id"] = serde_json::Value::Number(reply_id.into());
+        }
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .timeout(Duration::from_secs(12))
+            .send()
+            .await?;
+
+        // Check HTTP status first
+        if !resp.status().is_success() {
+            return Err(format!(
+                "failed to send message to chat {}: HTTP {}",
+                chat_id,
+                resp.status()
+            )
+            .into());
+        }
+
+        // Parse JSON response
+        let json = resp
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| format!("failed to parse response: {}", e))?;
+
+        // Handle Telegram API response
+        match (
+            json.get("ok").and_then(|v| v.as_bool()),
+            json.get("result"),
+            json.get("description").and_then(|v| v.as_str()),
+        ) {
+            (Some(true), Some(_result), _) => {
+                debug!("message sent to chat {}: {}", chat_id, text);
+                Ok(())
+            }
+            (Some(false), _, Some(description)) => {
+                error!("telegram API error for chat {}: {}", chat_id, description);
+                Err(format!(
+                    "failed to send message to chat {}: {}",
+                    chat_id, description
+                )
+                .into())
+            }
+            (Some(false), _, None) => {
+                error!(
+                    "telegram API error for chat {} without description",
+                    chat_id
+                );
+                Err(format!("failed to send message to chat {}: unknown error", chat_id).into())
+            }
+            _ => {
+                error!(
+                    "malformed telegram API response for chat {}: {:?}",
+                    chat_id, json
+                );
+                Err(format!(
+                    "failed to send message to chat {}: malformed response",
+                    chat_id
+                )
+                .into())
+            }
+        }
+    }
+
+    /// Send a reply to a specific message
+    pub async fn send_reply_message(
+        &self,
+        chat_id: i64,
+        reply_to_message_id: i64,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.send_message_with_options(
+            chat_id,
+            text,
+            Some("MarkdownV2"),
+            true, // disable notification for replies
+            true, // protect content
+            Some(reply_to_message_id),
+        )
+        .await
+    }
+
+    /// Delete a message from a chat
+    pub async fn delete_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("https://api.telegram.org/bot{}/deleteMessage", self.token);
+
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(format!(
+                "failed to delete message {} in chat {}: HTTP {}",
+                message_id,
+                chat_id,
+                resp.status()
+            )
+            .into());
+        }
+
+        let json = resp.json::<serde_json::Value>().await?;
+
+        match json.get("ok").and_then(|v| v.as_bool()) {
+            Some(true) => {
+                debug!("message {} deleted from chat {}", message_id, chat_id);
+                Ok(())
+            }
+            Some(false) => {
+                let description = json
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                Err(format!("failed to delete message: {}", description).into())
+            }
+            _ => Err("malformed response".into()),
         }
     }
 
@@ -255,7 +504,7 @@ impl Bot {
                                     } */
 
                                     info!("processing message from chat#{}", message.chat.id);
-                                    Self::process_message(message, pool).await;
+                                    self.process_message(message, pool).await;
                                 }
                             }
                         }
@@ -270,6 +519,7 @@ impl Bot {
         }
     }
 
+    /// Fetch updates from Telegram Bot API
     async fn get_updates(
         client: &Client,
         token: &str,
@@ -305,14 +555,24 @@ impl Bot {
         Ok(body.result)
     }
 
-    async fn process_message(message: Message, pool: &DB) {
+    /// Send a simple text message to a chat (legacy wrapper)
+    pub async fn send_text_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.send_formatted_message(chat_id, text, true, true).await
+    }
+
+    /// Process a single message from Telegram
+    async fn process_message(&self, message: Message, db: &DB) {
         info!(
             "processing message {}: {:?}",
             message.message_id, message.text
         );
 
         // Upsert message and user to database
-        match pool.upsert_message(&message).await {
+        match db.upsert_message(&message).await {
             Ok(_) => {
                 debug!(
                     "successfully upserted message {} to database",
@@ -326,6 +586,47 @@ impl Bot {
                 );
             }
         }
+
+        // Check if user verified their identity
+        let user = message.from.as_ref();
+        if user.is_none() {
+            debug!(
+                "message from chat#{} without user, skipping",
+                message.chat.id
+            );
+            return;
+        }
+
+        let user = user.unwrap();
+        let user_id = user.id;
+        debug!("checking user {} in database", user.id);
+        match db.is_user_verified(user_id).await {
+            true => {
+                return; // User is verified, no further action needed
+            }
+            false => {
+                debug!("user {} is not verified", user.id);
+                // Here you would send a verification request to the user
+                // For example, send a message with instructions to verify their identity
+            }
+        }
+
+        let _message_type = message.metadata().message_type;
+        let verification_message = Self::format_message_with_user(
+            user,
+            "Please verify your identity to use this bot. You can do this by sending a verification code or following the instructions provided.",
+        );
+
+        self.send_text_message(message.chat.id, &verification_message)
+            .await
+            .unwrap_or_else(|e| {
+                error!(
+                    "failed to send verification message to user {}: {}",
+                    user.id, e
+                );
+            });
+
+        // If the user is not verified, you might want to send them a message
     }
 }
 
@@ -425,5 +726,57 @@ impl Message {
                 },
             }
         })
+    }
+
+    /// Get the text content of the message (text or caption)
+    pub fn text_content(&self) -> Option<&str> {
+        self.text.as_deref().or(self.caption.as_deref())
+    }
+
+    /// Check if message contains media
+    pub fn has_media(&self) -> bool {
+        self.photo.is_some()
+            || self.video.is_some()
+            || self.audio.is_some()
+            || self.document.is_some()
+            || self.sticker.is_some()
+            || self.animation.is_some()
+            || self.voice.is_some()
+            || self.video_note.is_some()
+    }
+
+    /// Check if message is a reply to another message
+    pub fn is_reply(&self) -> bool {
+        self.reply_to_message.is_some()
+    }
+
+    /// Get the username or display name of the sender
+    pub fn sender_display_name(&self) -> Option<String> {
+        self.from.as_ref().map(|user| match &user.username {
+            Some(username) => format!("@{}", username),
+            None => Bot::user_display_name(user),
+        })
+    }
+
+    /// Check if message is from a bot
+    pub fn is_from_bot(&self) -> bool {
+        matches!(self.from.as_ref(), Some(user) if user.is_bot)
+    }
+
+    /// Get the age of the message in seconds
+    pub fn age_seconds(&self) -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        now.saturating_sub(self.date)
+    }
+
+    /// Check if message is older than specified duration
+    pub fn is_older_than(&self, duration: Duration) -> bool {
+        self.age_seconds() > duration.as_secs()
     }
 }
