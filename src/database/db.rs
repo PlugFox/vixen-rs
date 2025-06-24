@@ -157,81 +157,75 @@ impl DB {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Message without sender not supported"))?;
 
-        // Batch upsert using separate queries to avoid multi-statement issues
-        // First upsert chat info
-        sqlx::query(
-            r#"INSERT INTO chat_info (chat_id, chat_type, title, username, first_name, last_name, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
-               ON CONFLICT(chat_id) DO UPDATE SET
-                   chat_type = excluded.chat_type,
-                   title = excluded.title,
-                   username = excluded.username,
-                   first_name = excluded.first_name,
-                   last_name = excluded.last_name,
-                   updated_at = strftime('%s', 'now')"#,
-        )
-        .bind(message.chat.id)
-        .bind(chat_type_str)
-        .bind(&message.chat.title)
-        .bind(&message.chat.username)
-        .bind(&message.chat.first_name)
-        .bind(&message.chat.last_name)
-        .execute(&mut *tx)
-        .await?;
+        // Batch upsert using a single query with positional parameters for better performance
+        let batch_query = r#"
+            -- Upsert chat info
+            INSERT INTO chat_info (chat_id, chat_type, title, username, first_name, last_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+            ON CONFLICT(chat_id) DO UPDATE SET
+                chat_type = excluded.chat_type,
+                title = excluded.title,
+                username = excluded.username,
+                first_name = excluded.first_name,
+                last_name = excluded.last_name,
+                updated_at = strftime('%s', 'now');
 
-        // Upsert user
-        sqlx::query(
-            r#"INSERT INTO users (user_id, is_bot, first_name, last_name, username, language_code)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                   is_bot = excluded.is_bot,
-                   first_name = excluded.first_name,
-                   last_name = excluded.last_name,
-                   username = excluded.username,
-                   language_code = excluded.language_code"#,
-        )
-        .bind(user.id)
-        .bind(if user.is_bot { 1 } else { 0 })
-        .bind(&user.first_name)
-        .bind(&user.last_name)
-        .bind(&user.username)
-        .bind(&user.language_code)
-        .execute(&mut *tx)
-        .await?;
+            -- Upsert user
+            INSERT INTO users (user_id, is_bot, first_name, last_name, username, language_code)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                is_bot = excluded.is_bot,
+                first_name = excluded.first_name,
+                last_name = excluded.last_name,
+                username = excluded.username,
+                language_code = excluded.language_code;
 
-        // Upsert chat_user relationship
-        sqlx::query(
-            r#"INSERT INTO chat_user (chat_id, user_id) VALUES (?, ?)
-               ON CONFLICT(chat_id, user_id) DO NOTHING"#,
-        )
-        .bind(message.chat.id)
-        .bind(user.id)
-        .execute(&mut *tx)
-        .await?;
+            -- Upsert chat_user relationship
+            INSERT INTO chat_user (chat_id, user_id) VALUES (?, ?)
+            ON CONFLICT(chat_id, user_id) DO NOTHING;
 
-        // Insert/update message
-        sqlx::query(
-            r#"INSERT INTO messages (message_id, chat_id, user_id, date, message_type, reply_to, length, content)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(message_id) DO UPDATE SET
-                   chat_id = excluded.chat_id,
-                   user_id = excluded.user_id,
-                   date = excluded.date,
-                   message_type = excluded.message_type,
-                   reply_to = excluded.reply_to,
-                   length = excluded.length,
-                   content = excluded.content"#,
-        )
-        .bind(message.message_id)
-        .bind(message.chat.id)
-        .bind(user.id)
-        .bind(message.date as i64)
-        .bind(metadata.message_type)
-        .bind(reply_to)
-        .bind(metadata.length)
-        .bind(&metadata.content)
-        .execute(&mut *tx)
-        .await?;
+            -- Insert/update message
+            INSERT INTO messages (message_id, chat_id, user_id, date, message_type, reply_to, length, content)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                chat_id = excluded.chat_id,
+                user_id = excluded.user_id,
+                date = excluded.date,
+                message_type = excluded.message_type,
+                reply_to = excluded.reply_to,
+                length = excluded.length,
+                content = excluded.content;
+        "#;
+
+        sqlx::query(batch_query)
+            // Chat parameters (6 params)
+            .bind(message.chat.id) // chat_id
+            .bind(chat_type_str) // chat_type
+            .bind(&message.chat.title) // title
+            .bind(&message.chat.username) // username
+            .bind(&message.chat.first_name) // first_name
+            .bind(&message.chat.last_name) // last_name
+            // User parameters (6 params)
+            .bind(user.id) // user_id
+            .bind(if user.is_bot { 1 } else { 0 }) // is_bot
+            .bind(&user.first_name) // first_name
+            .bind(&user.last_name) // last_name
+            .bind(&user.username) // username
+            .bind(&user.language_code) // language_code
+            // Chat-user relationship (2 params)
+            .bind(message.chat.id) // chat_id
+            .bind(user.id) // user_id
+            // Message parameters (8 params)
+            .bind(message.message_id) // message_id
+            .bind(message.chat.id) // chat_id
+            .bind(user.id) // user_id
+            .bind(message.date as i64) // date
+            .bind(metadata.message_type) // message_type
+            .bind(reply_to) // reply_to
+            .bind(metadata.length) // length
+            .bind(&metadata.content) // content
+            .execute(&mut *tx)
+            .await?;
 
         // Commit transaction
         tx.commit().await?;
