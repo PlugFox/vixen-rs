@@ -982,7 +982,7 @@ impl Bot {
 
             let verification_message = format!(
                 "👋 Hello *{}* \\[`{}`\\] \\!\n\nPlease solve the _following captcha_ to start chatting\\.",
-                Self::user_display_name(user),
+                Self::user_mention(user_id, &Self::user_display_name(user)),
                 user_id,
             );
 
