@@ -976,6 +976,34 @@ impl Bot {
         }
 
         {
+            // Check, maybe the user is already has a captcha
+            match db.check_user_has_captcha(chat_id, user_id).await {
+                Ok(true) => {
+                    // User already has a captcha, no need to generate a new one
+                    debug!(
+                        "user {} already has a captcha, skipping verification",
+                        user.id
+                    );
+                    return; // User is alreade has a captcha, no need to generate a new one
+                }
+                Ok(false) => {
+                    debug!(
+                        "user {} does not have a captcha, generating a new one",
+                        user.id
+                    );
+                }
+                Err(e) => {
+                    error!("failed to check if user {} has a captcha: {}", user.id, e);
+                    // If we can't check, we assume the user does not have a captcha
+                    debug!(
+                        "assuming user {} does not have a captcha due to error",
+                        user.id
+                    );
+                }
+            }
+        }
+
+        {
             // Generate a captcha for the user and send it
             let service = CaptchaService::new();
             let captcha = service.generate().await;

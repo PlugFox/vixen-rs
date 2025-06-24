@@ -332,6 +332,28 @@ impl DB {
         Ok(())
     }
 
+    /// Check if a user has an active captcha in the database
+    pub async fn check_user_has_captcha(&self, chat_id: i64, user_id: i64) -> Result<bool> {
+        // Check if the messages_captcha table exists
+        let has_captcha = sqlx::query(&normalize_sql_query(
+            r#"
+        |SELECT COUNT(*) FROM messages_captcha WHERE user_id = ? AND expires_at > ? AND chat_id = ? AND deleted = 0 LIMIT 1;
+        "#,
+        ))
+        .bind(user_id)
+        .bind(chat_id)
+        .bind(chrono::Utc::now().timestamp())
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.is_some())
+        .map_err(|e| {
+            error!("failed to fetch user captcha: {}", e);
+            e
+        })?;
+
+        Ok(has_captcha)
+    }
+
     /// Upsert a captcha into the database
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert_captcha(
