@@ -5,6 +5,52 @@ use tracing::{debug, error, info};
 
 use crate::telegram;
 
+/// Normalize SQL query string by removing leading whitespace and pipe characters
+/// This allows for 1C-style query formatting where each line starts with |
+///
+/// Example input:
+/// ```
+/// "
+///     |SELECT *
+///     |FROM users
+///     |WHERE id = ?
+/// "
+/// ```
+///
+/// Example output:
+/// ```
+/// "SELECT *
+/// FROM users
+/// WHERE id = ?"
+/// ```
+fn normalize_sql_query(query: &str) -> String {
+    // Pre-allocate with estimated capacity to avoid reallocations
+    let mut result = String::with_capacity(query.len());
+    let mut first_line = true;
+
+    for line in query.trim().lines() {
+        // Skip empty lines at the beginning
+        if first_line && line.trim().is_empty() {
+            continue;
+        }
+
+        if !first_line {
+            result.push('\n');
+        }
+
+        // Find pipe and extract content efficiently
+        if let Some(pipe_pos) = line.find('|') {
+            result.push_str(&line[pipe_pos + 1..]);
+        } else if !line.trim().is_empty() {
+            result.push_str(line.trim_start());
+        }
+
+        first_line = false;
+    }
+
+    result
+}
+
 /// Thread-safe wrapper around SqlitePool
 ///
 /// SQLite with WAL mode supports multiple concurrent readers and one writer.
@@ -98,9 +144,13 @@ impl DB {
         }
 
         // Check the database for the user
-        let verified = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT user_id FROM users_verified WHERE user_id = ? LIMIT 1",
-        )
+        let verified = sqlx::query_scalar::<_, Option<i64>>(&normalize_sql_query(
+            r#"
+            |SELECT user_id FROM users_verified
+            |WHERE user_id = ?
+            |LIMIT 1
+        "#,
+        ))
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
@@ -121,10 +171,15 @@ impl DB {
         user_id: i64, /* user: &telegram::User */
     ) -> Result<()> {
         // Insert the user into the database
-        sqlx::query("INSERT INTO users_verified (user_id) VALUES (?)")
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(&normalize_sql_query(
+            r#"
+        |INSERT INTO users_verified (user_id)
+        |VALUES (?)
+        "#,
+        ))
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
 
         // Add to the in-memory set
         let mut write = self.users_verified.write().await;
@@ -158,46 +213,48 @@ impl DB {
             .ok_or_else(|| anyhow::anyhow!("Message without sender not supported"))?;
 
         // Batch upsert using a single query with positional parameters for better performance
-        let batch_query = r#"
-            -- Upsert chat info
-            INSERT INTO chat_info (chat_id, chat_type, title, username, first_name, last_name, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
-            ON CONFLICT(chat_id) DO UPDATE SET
-                chat_type = excluded.chat_type,
-                title = excluded.title,
-                username = excluded.username,
-                first_name = excluded.first_name,
-                last_name = excluded.last_name,
-                updated_at = strftime('%s', 'now');
+        let batch_query = normalize_sql_query(
+            r#"
+        |-- Upsert chat info
+        |INSERT INTO chat_info (chat_id, chat_type, title, username, first_name, last_name, updated_at)
+        |VALUES (?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+        |ON CONFLICT(chat_id) DO UPDATE SET
+        |    chat_type = excluded.chat_type,
+        |    title = excluded.title,
+        |    username = excluded.username,
+        |    first_name = excluded.first_name,
+        |    last_name = excluded.last_name,
+        |    updated_at = strftime('%s', 'now');
+        |
+        |-- Upsert user
+        |INSERT INTO users (user_id, is_bot, first_name, last_name, username, language_code)
+        |VALUES (?, ?, ?, ?, ?, ?)
+        |ON CONFLICT(user_id) DO UPDATE SET
+        |    is_bot = excluded.is_bot,
+        |    first_name = excluded.first_name,
+        |    last_name = excluded.last_name,
+        |    username = excluded.username,
+        |    language_code = excluded.language_code;
+        |
+        |-- Upsert chat_user relationship
+        |INSERT INTO chat_user (chat_id, user_id) VALUES (?, ?)
+        |ON CONFLICT(chat_id, user_id) DO NOTHING;
+        |
+        |-- Insert/update message
+        |INSERT INTO messages (message_id, chat_id, user_id, date, message_type, reply_to, length, content)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        |ON CONFLICT(message_id) DO UPDATE SET
+        |    chat_id = excluded.chat_id,
+        |    user_id = excluded.user_id,
+        |    date = excluded.date,
+        |    message_type = excluded.message_type,
+        |    reply_to = excluded.reply_to,
+        |    length = excluded.length,
+        |    content = excluded.content;
+        "#,
+        );
 
-            -- Upsert user
-            INSERT INTO users (user_id, is_bot, first_name, last_name, username, language_code)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                is_bot = excluded.is_bot,
-                first_name = excluded.first_name,
-                last_name = excluded.last_name,
-                username = excluded.username,
-                language_code = excluded.language_code;
-
-            -- Upsert chat_user relationship
-            INSERT INTO chat_user (chat_id, user_id) VALUES (?, ?)
-            ON CONFLICT(chat_id, user_id) DO NOTHING;
-
-            -- Insert/update message
-            INSERT INTO messages (message_id, chat_id, user_id, date, message_type, reply_to, length, content)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(message_id) DO UPDATE SET
-                chat_id = excluded.chat_id,
-                user_id = excluded.user_id,
-                date = excluded.date,
-                message_type = excluded.message_type,
-                reply_to = excluded.reply_to,
-                length = excluded.length,
-                content = excluded.content;
-        "#;
-
-        sqlx::query(batch_query)
+        sqlx::query(&batch_query)
             // Chat parameters (6 params)
             .bind(message.chat.id) // chat_id
             .bind(chat_type_str) // chat_type
