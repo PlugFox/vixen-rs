@@ -3,6 +3,8 @@ use sqlx::{SqlitePool, migrate::MigrateDatabase, sqlite::SqlitePoolOptions};
 use std::{path::Path, time::Duration};
 use tracing::{debug, error, info};
 
+use crate::telegram;
+
 /// Thread-safe wrapper around SqlitePool
 ///
 /// SQLite with WAL mode supports multiple concurrent readers and one writer.
@@ -13,13 +15,19 @@ use tracing::{debug, error, info};
 /// 4. Connection pooling prevents resource exhaustion
 #[derive(Clone)]
 pub struct DB {
+    users_verified: std::sync::Arc<tokio::sync::RwLock<std::collections::HashSet<i64>>>,
     pool: SqlitePool,
 }
 
 impl DB {
     /// Create a new DB from an existing SqlitePool
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            users_verified: std::sync::Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashSet::new(),
+            )),
+            pool,
+        }
     }
 
     /// Connect to the SQLite database at the specified URL
@@ -78,6 +86,57 @@ impl DB {
     pub async fn health_check(&self) -> Result<bool, sqlx::Error> {
         let result: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&self.pool).await?;
         Ok(result == 1)
+    }
+
+    /// Check if a user is already verified
+    pub async fn is_user_verified(&self, user_id: i64) -> bool {
+        {
+            let read = self.users_verified.read().await;
+            if read.contains(&user_id) {
+                return true;
+            }
+        }
+
+        // Check the database for the user
+        let verified = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT user_id FROM users_verified WHERE user_id = ? LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .is_ok_and(|row| row.is_some());
+
+        // If the user is verified, add them to the in-memory set
+        if verified {
+            let mut write = self.users_verified.write().await;
+            write.insert(user_id);
+        }
+
+        verified
+    }
+
+    /// Mark a user as verified in the database and in-memory set
+    pub async fn mark_user_verified(
+        &self,
+        user_id: i64, /* user: &telegram::User */
+    ) -> Result<()> {
+        // Insert the user into the database
+        sqlx::query("INSERT INTO users_verified (user_id) VALUES (?)")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        // Add to the in-memory set
+        let mut write = self.users_verified.write().await;
+        write.insert(user_id);
+
+        Ok(())
+    }
+
+    /// Upsert a message and an user to the database in a single transaction
+    pub async fn upsert_message(&self, message: &telegram::Message) -> Result<()> {
+        
+        Ok(())
     }
 }
 

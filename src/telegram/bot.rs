@@ -8,24 +8,24 @@ use tracing::{debug, error, info};
 use crate::database::DB;
 
 #[derive(Debug, Deserialize)]
-struct User {
+pub struct User {
     // Unique identifier for this user or bot
-    id: i64,
+    pub id: i64,
     // True, if this user is a bot
-    is_bot: bool,
+    pub is_bot: bool,
     // User's or bot's first name
-    first_name: String,
+    pub first_name: String,
     // Optional. User's or bot's last name
-    last_name: Option<String>,
+    pub last_name: Option<String>,
     // Optional. User's or bot's username
-    username: Option<String>,
+    pub username: Option<String>,
     // Optional. IETF language tag of the user's language
-    language_code: Option<String>,
+    pub language_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-enum ChatType {
+pub enum ChatType {
     #[serde(rename = "private")]
     Private,
     #[serde(rename = "group")]
@@ -37,102 +37,102 @@ enum ChatType {
 }
 
 #[derive(Debug, Deserialize)]
-struct Chat {
+pub struct Chat {
     // Unique identifier for this chat
-    id: i64,
+    pub id: i64,
 
     // Type of the chat, can be either “private”, “group”, “supergroup” or “channel”
     #[serde(rename = "type")]
-    chat_type: ChatType,
+    pub chat_type: ChatType,
 
     // Optional. Title, for supergroups, channels and group chats
-    title: Option<String>,
+    pub title: Option<String>,
 
     // Optional. Username, for private chats, supergroups and channels if available
-    username: Option<String>,
+    pub username: Option<String>,
 
     // Optional. First name of the other party in a private chat
-    first_name: Option<String>,
+    pub first_name: Option<String>,
 
     // Optional. Last name of the other party in a private chat
-    last_name: Option<String>,
+    pub last_name: Option<String>,
 
     // Optional. True, if the supergroup chat is a forum (has topics enabled)
-    is_forum: Option<bool>, // Optional. True, if the supergroup chat is a forum (has topics enabled)
+    pub is_forum: Option<bool>, // Optional. True, if the supergroup chat is a forum (has topics enabled)
 }
 
 #[derive(Debug, Deserialize)]
-struct Message {
+pub struct Message {
     // Unique message identifier inside this chat
-    message_id: i64,
+    pub message_id: i64,
 
     // Date the message was sent in Unix time
     // It is always a positive number, representing a valid date
-    date: u64,
+    pub date: u64,
 
     // Chat the message belongs to
-    chat: Chat,
+    pub chat: Chat,
 
     // Optional. Sender of the message; may be empty for messages sent to channels
-    from: Option<User>,
+    pub from: Option<User>,
 
     // Optional. For replies in the same chat and message thread, the original message.
-    reply_to_message: Option<Box<Message>>,
+    pub reply_to_message: Option<Box<Message>>,
 
     // Optional. For text messages, the actual UTF-8 text of the message
-    text: Option<String>,
+    pub text: Option<String>,
 
     // Optional. For text messages, special entities like usernames, URLs, bot commands, etc. that appear in the text
     #[serde(default)]
-    entities: Option<Vec<serde_json::Value>>,
+    pub entities: Option<Vec<serde_json::Value>>,
 
     // Optional. Message is a forwarded story
     #[serde(default)]
-    story: Option<serde_json::Value>,
+    pub story: Option<serde_json::Value>,
 
     // 	Optional. Message is a video, information about the video
     #[serde(default)]
-    video: Option<serde_json::Value>,
+    pub video: Option<serde_json::Value>,
 
     // Optional. Message is an animation, information about the animation
     // For backward compatibility, when this field is set, the document field will also be set
     #[serde(default)]
-    animation: Option<serde_json::Value>,
+    pub animation: Option<serde_json::Value>,
 
     // Optional. Message is an audio file, information about the file
     #[serde(default)]
-    audio: Option<serde_json::Value>,
+    pub audio: Option<serde_json::Value>,
 
     // Optional. Message is a general file, information about the file
     #[serde(default)]
-    document: Option<serde_json::Value>,
+    pub document: Option<serde_json::Value>,
 
     // Optional. Message is a photo, available sizes of the photo
     #[serde(default)]
-    photo: Option<serde_json::Value>,
+    pub photo: Option<serde_json::Value>,
 
     // Optional. Message is a sticker, information about the sticker
     #[serde(default)]
-    sticker: Option<serde_json::Value>,
+    pub sticker: Option<serde_json::Value>,
 
     // Optional. Message is a contact, information about the contact
     #[serde(default)]
-    video_note: Option<serde_json::Value>,
+    pub video_note: Option<serde_json::Value>,
 
     // Optional. Message is a voice message, information about the voice message
     #[serde(default)]
-    voice: Option<serde_json::Value>,
+    pub voice: Option<serde_json::Value>,
 
     // Optional. Message is a game, information about the game.
     #[serde(default)]
-    game: Option<serde_json::Value>,
+    pub game: Option<serde_json::Value>,
 
     // Optional. Caption for the animation, audio, document, paid media, photo, video or voice
-    caption: Option<String>,
+    pub caption: Option<String>,
 
     // Optional. For messages with a caption,
     // special entities like usernames, URLs, bot commands, etc. that appear in the caption
-    caption_entities: Option<Vec<serde_json::Value>>,
+    pub caption_entities: Option<Vec<serde_json::Value>>,
 }
 
 struct CallbackQuery {
