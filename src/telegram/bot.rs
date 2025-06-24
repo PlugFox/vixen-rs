@@ -976,6 +976,12 @@ impl Bot {
         }
 
         {
+            // Check if the message have a lot of duplicates as a spam
+
+            todo!("implement spam detection logic here");
+        }
+
+        {
             // Check, maybe the user is already has a captcha
             match db.check_user_has_captcha(chat_id, user_id).await {
                 Ok(true) => {
