@@ -1,4 +1,5 @@
 use core::fmt;
+use once_cell::sync::OnceCell;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json;
@@ -59,6 +60,13 @@ pub struct Chat {
 
     // Optional. True, if the supergroup chat is a forum (has topics enabled)
     pub is_forum: Option<bool>, // Optional. True, if the supergroup chat is a forum (has topics enabled)
+}
+
+#[derive(Debug, Clone)]
+pub struct MessageMetadata {
+    pub message_type: &'static str,
+    pub content: String,
+    pub length: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,6 +141,10 @@ pub struct Message {
     // Optional. For messages with a caption,
     // special entities like usernames, URLs, bot commands, etc. that appear in the caption
     pub caption_entities: Option<Vec<serde_json::Value>>,
+
+    // Lazy-computed metadata cache
+    #[serde(skip)]
+    metadata: OnceCell<MessageMetadata>,
 }
 
 struct CallbackQuery {
@@ -234,7 +246,13 @@ impl Bot {
                                     } else if has_chats && !chats.contains(&message.chat.id) {
                                         debug!("ignoring message from chat#{}", message.chat.id);
                                         continue; // Skip messages from non-configured chats
-                                    }
+                                    } else if message.from.is_none() {
+                                        debug!("ignoring message without sender from chat#{}", message.chat.id);
+                                        continue; // Skip messages without text or photo
+                                    } /* else if message.text.is_none() && message.caption.is_none() {
+                                        debug!("ignoring message without text or caption from chat#{}", message.chat.id);
+                                        continue; // Skip messages without text or photo
+                                    } */
 
                                     info!("processing message from chat#{}", message.chat.id);
                                     Self::process_message(message, pool).await;
@@ -288,10 +306,124 @@ impl Bot {
     }
 
     async fn process_message(message: Message, pool: &DB) {
-        // TODO: реализовать обработку сообщения и работу с БД
         info!(
             "processing message {}: {:?}",
             message.message_id, message.text
         );
+
+        // Upsert message and user to database
+        match pool.upsert_message(&message).await {
+            Ok(_) => {
+                debug!(
+                    "successfully upserted message {} to database",
+                    message.message_id
+                );
+            }
+            Err(e) => {
+                error!(
+                    "failed to upsert message {} to database: {}",
+                    message.message_id, e
+                );
+            }
+        }
+    }
+}
+
+impl Message {
+    /// Get message metadata (type, content, length) - computed lazily and cached
+    pub fn metadata(&self) -> &MessageMetadata {
+        self.metadata.get_or_init(|| {
+            use MessageMetadata as Meta;
+
+            match (
+                &self.text,
+                &self.photo,
+                &self.video,
+                &self.audio,
+                &self.document,
+                &self.sticker,
+                &self.animation,
+                &self.voice,
+                &self.video_note,
+                &self.game,
+            ) {
+                // Text message
+                (Some(text), None, None, None, None, None, None, None, None, None) => Meta {
+                    message_type: "text",
+                    content: text.clone(),
+                    length: text.len() as i32,
+                },
+                // Media with possible caption
+                (_, Some(_), _, _, _, _, _, _, _, _) => {
+                    let caption = self.caption.clone().unwrap_or_default();
+                    Meta {
+                        message_type: "photo",
+                        content: caption.clone(),
+                        length: caption.len() as i32,
+                    }
+                }
+                (_, _, Some(_), _, _, _, _, _, _, _) => {
+                    let caption = self.caption.clone().unwrap_or_default();
+                    Meta {
+                        message_type: "video",
+                        content: caption.clone(),
+                        length: caption.len() as i32,
+                    }
+                }
+                (_, _, _, Some(_), _, _, _, _, _, _) => {
+                    let caption = self.caption.clone().unwrap_or_default();
+                    Meta {
+                        message_type: "audio",
+                        content: caption.clone(),
+                        length: caption.len() as i32,
+                    }
+                }
+                (_, _, _, _, Some(_), _, _, _, _, _) => {
+                    let caption = self.caption.clone().unwrap_or_default();
+                    Meta {
+                        message_type: "document",
+                        content: caption.clone(),
+                        length: caption.len() as i32,
+                    }
+                }
+                (_, _, _, _, _, Some(_), _, _, _, _) => Meta {
+                    message_type: "sticker",
+                    content: String::new(),
+                    length: 0,
+                },
+                (_, _, _, _, _, _, Some(_), _, _, _) => {
+                    let caption = self.caption.clone().unwrap_or_default();
+                    Meta {
+                        message_type: "animation",
+                        content: caption.clone(),
+                        length: caption.len() as i32,
+                    }
+                }
+                (_, _, _, _, _, _, _, Some(_), _, _) => {
+                    let caption = self.caption.clone().unwrap_or_default();
+                    Meta {
+                        message_type: "voice",
+                        content: caption.clone(),
+                        length: caption.len() as i32,
+                    }
+                }
+                (_, _, _, _, _, _, _, _, Some(_), _) => Meta {
+                    message_type: "video_note",
+                    content: String::new(),
+                    length: 0,
+                },
+                (_, _, _, _, _, _, _, _, _, Some(_)) => Meta {
+                    message_type: "game",
+                    content: String::new(),
+                    length: 0,
+                },
+                // Default case
+                _ => Meta {
+                    message_type: "other",
+                    content: String::new(),
+                    length: 0,
+                },
+            }
+        })
     }
 }
