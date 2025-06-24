@@ -6,7 +6,10 @@ use serde_json;
 use std::{collections::HashSet, ops::Add, time::Duration};
 use tracing::{debug, error, info};
 
-use crate::database::DB;
+use crate::{
+    captcha::{Captcha, CaptchaService},
+    database::DB,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct User {
@@ -649,6 +652,241 @@ impl Bot {
         self.send_formatted_message(chat_id, text, true, true).await
     }
 
+    /// Send a photo to a chat
+    pub async fn send_photo(
+        &self,
+        chat_id: i64,
+        photo_bytes: Vec<u8>,
+        filename: &str,
+        caption: Option<&str>,
+        disable_notification: bool,
+        reply_markup: Option<&str>,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("https://api.telegram.org/bot{}/sendPhoto", self.token);
+
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .text("protect_content", "true")
+            .text(
+                "disable_notification",
+                if disable_notification {
+                    "true"
+                } else {
+                    "false"
+                },
+            )
+            .part(
+                "photo",
+                reqwest::multipart::Part::bytes(photo_bytes)
+                    .file_name(filename.to_string())
+                    .mime_str("image/jpeg")?,
+            );
+
+        let form = if let Some(caption) = caption {
+            form.text("parse_mode", "MarkdownV2")
+                .text("caption", caption.to_string())
+                .text("show_caption_above_media", "true")
+        } else {
+            form
+        };
+
+        let form = if let Some(reply) = reply_markup {
+            form.text("reply_markup", reply.to_string())
+        } else {
+            form
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .timeout(Duration::from_secs(12))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(format!(
+                "failed to send photo to chat {}: HTTP {}",
+                chat_id,
+                resp.status()
+            )
+            .into());
+        }
+
+        let json = resp.json::<serde_json::Value>().await?;
+
+        match (
+            json.get("ok").and_then(|v| v.as_bool()),
+            json.get("result")
+                .and_then(|r| r.get("message_id"))
+                .and_then(|id| id.as_i64()),
+            json.get("description").and_then(|v| v.as_str()),
+        ) {
+            (Some(true), Some(message_id), _) => {
+                debug!("photo sent to chat {}: message_id {}", chat_id, message_id);
+                Ok(message_id)
+            }
+            (Some(false), _, Some(description)) => {
+                error!(
+                    "telegram API error for photo in chat {}: {}",
+                    chat_id, description
+                );
+                Err(format!("failed to send photo to chat {}: {}", chat_id, description).into())
+            }
+            (Some(false), _, None) => {
+                error!(
+                    "telegram API error for photo in chat {} without description",
+                    chat_id
+                );
+                Err(format!("failed to send photo to chat {}: unknown error", chat_id).into())
+            }
+            _ => {
+                error!(
+                    "malformed telegram API response for photo in chat {}: {:?}",
+                    chat_id, json
+                );
+                Err(format!(
+                    "failed to send photo to chat {}: malformed response",
+                    chat_id
+                )
+                .into())
+            }
+        }
+    }
+
+    /// Edit a photo caption in a chat
+    pub async fn edit_photo_caption(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        caption: Option<&str>,
+        reply_markup: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/editMessageCaption",
+            self.token
+        );
+
+        let mut payload = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+        });
+
+        if let Some(caption) = caption {
+            payload["parse_mode"] = serde_json::Value::String("MarkdownV2".to_string());
+            payload["caption"] = serde_json::Value::String(caption.to_string());
+            payload["show_caption_above_media"] = serde_json::Value::Bool(true);
+        }
+
+        if let Some(reply) = reply_markup {
+            payload["reply_markup"] = serde_json::Value::String(reply.to_string());
+        }
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .json(&payload)
+            .timeout(Duration::from_secs(12))
+            .send()
+            .await?;
+
+        // 200 OK or 400 Bad Request are both acceptable responses
+        if resp.status().is_success() || resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            debug!(
+                "photo caption edited in chat {}, message {}",
+                chat_id, message_id
+            );
+            return Ok(());
+        }
+
+        error!(
+            "failed to edit photo caption in chat {}, message {}: HTTP {}",
+            chat_id,
+            message_id,
+            resp.status()
+        );
+        Err(format!(
+            "failed to edit photo caption: status code {}",
+            resp.status()
+        )
+        .into())
+    }
+
+    /// Edit message media in a chat
+    pub async fn edit_message_media(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        photo_bytes: Vec<u8>,
+        filename: &str,
+        caption: Option<&str>,
+        reply_markup: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/editMessageMedia",
+            self.token
+        );
+
+        let mut media = serde_json::json!({
+            "type": "photo",
+            "media": "attach://media",
+        });
+
+        if let Some(caption) = caption {
+            media["parse_mode"] = serde_json::Value::String("MarkdownV2".to_string());
+            media["caption"] = serde_json::Value::String(caption.to_string());
+            media["show_caption_above_media"] = serde_json::Value::Bool(true);
+        }
+
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .text("message_id", message_id.to_string())
+            .text("media", serde_json::to_string(&media)?)
+            .part(
+                "media",
+                reqwest::multipart::Part::bytes(photo_bytes)
+                    .file_name(filename.to_string())
+                    .mime_str("image/jpeg")?,
+            );
+
+        let form = if let Some(reply) = reply_markup {
+            form.text("reply_markup", reply.to_string())
+        } else {
+            form
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .timeout(Duration::from_secs(12))
+            .send()
+            .await?;
+
+        // 200 OK or 400 Bad Request are both acceptable responses
+        if resp.status().is_success() || resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            debug!(
+                "message media edited in chat {}, message {}",
+                chat_id, message_id
+            );
+            return Ok(());
+        }
+
+        error!(
+            "failed to edit message media in chat {}, message {}: HTTP {}",
+            chat_id,
+            message_id,
+            resp.status()
+        );
+        Err(format!(
+            "failed to edit message media: status code {}",
+            resp.status()
+        )
+        .into())
+    }
+
     /// Process a single message from Telegram
     async fn process_message(&self, message: Message, db: &DB) {
         info!(
@@ -740,15 +978,38 @@ impl Bot {
             return;
         }
 
-        // Send verification message to the user
-        self.send_text_message(chat_id, &verification_message)
+        {
+            // Generate a captcha for the user and send it
+            let service = CaptchaService::new();
+            let captcha = service.generate().await;
+
+            let verification_message = format!(
+                r"👋 Hello *{}* \[`{}`\] !\n\nPlease solve the _following captcha_ to start chatting\:",
+                Self::user_display_name(user),
+                user_id,
+            );
+
+            self.send_photo(
+                chat_id,
+                captcha.bytes,
+                "captcha.webp",
+                Some(&verification_message),
+                false,                             // disable notification
+                Some(&*KB_CAPTCHA_MARKUP_ENCODED), // captcha keyboard markup
+            )
             .await
-            .unwrap_or_else(|e| {
-                error!(
-                    "failed to send verification message to user {}: {}",
-                    user.id, e
-                );
-            });
+            .expect("failed to send verification photo");
+        }
+
+        // Send verification message to the user
+        /* self.send_text_message(chat_id, &verification_message)
+        .await
+        .unwrap_or_else(|e| {
+            error!(
+                "failed to send verification message to user {}: {}",
+                user.id, e
+            );
+        }); */
 
         // If the user is not verified, you might want to send them a message
     }
@@ -942,3 +1203,58 @@ impl Message {
         self.age_seconds() > duration.as_secs()
     }
 }
+
+const KB_CAPTCHA_ONE: &str = r#"keyboard.captcha.one"#;
+
+const KB_CAPTCHA_TWO: &str = r#"keyboard.captcha.two"#;
+
+const KB_CAPTCHA_THREE: &str = r#"keyboard.captcha.three"#;
+
+const KB_CAPTCHA_FOUR: &str = r#"keyboard.captcha.four"#;
+
+const KB_CAPTCHA_FIVE: &str = r#"keyboard.captcha.five"#;
+
+const KB_CAPTCHA_SIX: &str = r#"keyboard.captcha.six"#;
+
+const KB_CAPTCHA_SEVEN: &str = r#"keyboard.captcha.seven"#;
+
+const KB_CAPTCHA_EIGHT: &str = r#"keyboard.captcha.eight"#;
+
+const KB_CAPTCHA_NINE: &str = r#"keyboard.captcha.nine"#;
+
+const KB_CAPTCHA_ZERO: &str = r#"keyboard.captcha.zero"#;
+
+const KB_CAPTCHA_REFRESH: &str = r#"keyboard.captcha.refresh"#;
+
+const KB_CAPTCHA_BACKSPACE: &str = r#"keyboard.captcha.backspace"#;
+
+/// Cached captcha keyboard markup - computed only once on first access
+static KB_CAPTCHA_MARKUP_ENCODED: once_cell::sync::Lazy<String> =
+    once_cell::sync::Lazy::new(|| {
+        let keyboard = serde_json::json!({
+            "inline_keyboard": [
+                [
+                    {"text": "1️⃣", "callback_data": KB_CAPTCHA_ONE},
+                    {"text": "2️⃣", "callback_data": KB_CAPTCHA_TWO},
+                    {"text": "3️⃣", "callback_data": KB_CAPTCHA_THREE},
+                ],
+                [
+                    {"text": "4️⃣", "callback_data": KB_CAPTCHA_FOUR},
+                    {"text": "5️⃣", "callback_data": KB_CAPTCHA_FIVE},
+                    {"text": "6️⃣", "callback_data": KB_CAPTCHA_SIX},
+                ],
+                [
+                    {"text": "7️⃣", "callback_data": KB_CAPTCHA_SEVEN},
+                    {"text": "8️⃣", "callback_data": KB_CAPTCHA_EIGHT},
+                    {"text": "9️⃣", "callback_data": KB_CAPTCHA_NINE},
+                ],
+                [
+                    {"text": "🔄", "callback_data": KB_CAPTCHA_REFRESH},
+                    {"text": "0️⃣", "callback_data": KB_CAPTCHA_ZERO},
+                    {"text": "↩️", "callback_data": KB_CAPTCHA_BACKSPACE},
+                ],
+            ]
+        });
+
+        serde_json::to_string(&keyboard).unwrap_or_default()
+    });
