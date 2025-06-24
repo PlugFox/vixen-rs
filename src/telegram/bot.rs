@@ -180,6 +180,7 @@ struct GetUpdates {
     result: Vec<Update>,
 }
 
+#[derive(Clone)]
 pub struct Bot {
     db: DB,
     client: Client,
@@ -482,36 +483,84 @@ impl Bot {
                     100, // limit of updates to fetch
                     vec!["message", "callback_query"]
                 ) => {
-                    match result {
-                        Ok(updates) => {
-                            for upd in updates {
-                                offset = upd.update_id + 1;
-                                info!("received update: {}", upd);
-                                // Process each update from Telegram Bot API
-                                if let Some(message) = upd.message {
-                                    if message.chat.chat_type == ChatType::Private {
-                                        debug!("ignoring private message from chat#{}", message.chat.id);
-                                        continue; // Skip private messages
-                                    } else if has_chats && !chats.contains(&message.chat.id) {
-                                        debug!("ignoring message from chat#{}", message.chat.id);
-                                        continue; // Skip messages from non-configured chats
-                                    } else if message.from.is_none() {
-                                        debug!("ignoring message without sender from chat#{}", message.chat.id);
-                                        continue; // Skip messages without text or photo
-                                    } /* else if message.text.is_none() && message.caption.is_none() {
-                                        debug!("ignoring message without text or caption from chat#{}", message.chat.id);
-                                        continue; // Skip messages without text or photo
-                                    } */
+                    // Safely handle the result with panic protection
+                    let panic_result = std::panic::AssertUnwindSafe(async {
+                        match result {
+                            Ok(updates) => {
+                                for upd in updates {
+                                    offset = upd.update_id + 1;
+                                    info!("received update: {}", upd);
 
-                                    info!("processing message from chat#{}", message.chat.id);
-                                    self.process_message(message, pool).await;
+                                    // Process each update from Telegram Bot API with panic protection
+                                    if let Some(message) = upd.message {
+                                        if message.chat.chat_type == ChatType::Private {
+                                            debug!("ignoring private message from chat#{}", message.chat.id);
+                                            continue; // Skip private messages
+                                        } else if has_chats && !chats.contains(&message.chat.id) {
+                                            debug!("ignoring message from chat#{}", message.chat.id);
+                                            continue; // Skip messages from non-configured chats
+                                        } else if message.from.is_none() {
+                                            debug!("ignoring message without sender from chat#{}", message.chat.id);
+                                            continue; // Skip messages without text or photo
+                                        } /* else if message.text.is_none() && message.caption.is_none() {
+                                            debug!("ignoring message without text or caption from chat#{}", message.chat.id);
+                                            continue; // Skip messages without text or photo
+                                        } */
+
+                                        info!("processing message from chat#{}", message.chat.id);
+
+                                        // Process message in a separate task to isolate potential panics
+                                        let process_result = tokio::spawn(Self::safe_process_message(
+                                            self.clone(),
+                                            message,
+                                            pool.clone()
+                                        )).await;
+
+                                        if let Err(join_err) = process_result {
+                                            if join_err.is_panic() {
+                                                error!(
+                                                    "panic occurred while processing message: {:?}",
+                                                    join_err
+                                                );
+                                            } else {
+                                                error!(
+                                                    "task was cancelled while processing message: {:?}",
+                                                    join_err
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
+                            Err(err) => {
+                                error!(%err, "error polling Telegram ");
+                                // A bit of backoff to avoid hammering the API
+                                tokio::time::sleep(Duration::from_secs(5)).await;
+                            }
                         }
-                        Err(err) => {
-                            error!(%err, "error polling Telegram ");
-                            // A bit of backoff to avoid hammering the API
-                            tokio::time::sleep(Duration::from_secs(5)).await;
+                    });
+
+                    // Execute with panic protection
+                    match std::panic::catch_unwind(move || {
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(panic_result)
+                        })
+                    }) {
+                        Ok(_) => {
+                            // Successfully processed updates
+                        }
+                        Err(panic_info) => {
+                            let panic_msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                                s.clone()
+                            } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else {
+                                "unknown panic".to_string()
+                            };
+
+                            error!("panic caught in polling loop: {}", panic_msg);
+                            // Add a longer backoff after panic to prevent rapid panic loops
+                            tokio::time::sleep(Duration::from_secs(10)).await;
                         }
                     }
                 }
@@ -627,6 +676,38 @@ impl Bot {
             });
 
         // If the user is not verified, you might want to send them a message
+    }
+
+    /// Safely process a single message from Telegram with panic protection
+    async fn safe_process_message(
+        bot: Bot,
+        message: Message,
+        db: DB,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Use std::panic::catch_unwind with AssertUnwindSafe to catch any panics
+        // that might occur during message processing
+        let panic_result = std::panic::AssertUnwindSafe(async {
+            bot.process_message(message, &db).await;
+        });
+
+        match std::panic::catch_unwind(move || {
+            tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(panic_result))
+        }) {
+            Ok(_) => {
+                debug!("message processed successfully");
+                Ok(())
+            }
+            Err(panic_info) => {
+                let panic_msg = panic_info
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
+                    .or_else(|| panic_info.downcast_ref::<&str>().copied())
+                    .unwrap_or("unknown panic");
+
+                error!("panic caught while processing message: {}", panic_msg);
+                Err(format!("message processing panic: {}", panic_msg).into())
+            }
+        }
     }
 }
 
