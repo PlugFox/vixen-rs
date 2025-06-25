@@ -3,7 +3,7 @@ use once_cell::sync::OnceCell;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json;
-use std::{collections::HashSet, ops::Add, time::Duration};
+use std::{collections::HashSet, ops::Add, sync::Arc, time::Duration};
 use tracing::{debug, error, info};
 
 use crate::{captcha::CaptchaService, database::DB};
@@ -247,8 +247,8 @@ struct GetUpdates {
 /// including message processing, user verification, captcha handling, and anti-spam measures.
 #[derive(Clone)]
 pub struct Bot {
-    db: DB,
-    client: Client,
+    db: Arc<DB>,
+    client: Arc<Client>,
     token: String,
     chats: HashSet<i64>,
 }
@@ -270,14 +270,16 @@ impl Bot {
             .filter_map(|chat| chat.parse::<i64>().ok())
             .collect();
         Bot {
-            db,
-            client: Client::builder()
-                .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-                .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
-                .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
-                .pool_max_idle_per_host(HTTP_POOL_MAX_IDLE_PER_HOST)
-                .build()
-                .expect("failed to build HTTP client"),
+            db: Arc::new(db),
+            client: Arc::new(
+                Client::builder()
+                    .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+                    .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+                    .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
+                    .pool_max_idle_per_host(HTTP_POOL_MAX_IDLE_PER_HOST)
+                    .build()
+                    .expect("failed to build HTTP client"),
+            ),
             token: token.to_string(),
             chats: chats_set,
         }
@@ -618,11 +620,10 @@ impl Bot {
 
                                         // Clone necessary data for the spawned task
                                         let bot_clone = bot.clone();
-                                        let message_clone = message.clone();
 
                                         // Process message in a separate task to isolate potential panics
                                         let process_result = tokio::spawn(async move {
-                                            Self::safe_process_message(&bot_clone, &message_clone).await
+                                            Self::safe_process_message(&bot_clone, &message).await
                                         }).await;
 
                                         if let Err(join_err) = process_result {
@@ -641,7 +642,7 @@ impl Bot {
                                     } else if let Some(callback_query) = upd.callback_query {
                                         let message = callback_query.message;
                                         let from = callback_query.from;
-                                        let data = callback_query.data.clone().unwrap_or_default();
+                                        let data = callback_query.data.unwrap_or_default();
                                         if message.is_none() {
                                             debug!("ignoring callback query without message");
                                             continue; // Skip callback queries without a message
@@ -661,13 +662,10 @@ impl Bot {
 
                                         // Clone necessary data for the spawned task
                                         let bot_clone = bot.clone();
-                                        let from_clone = from.clone();
-                                        let message_clone = message.clone();
-                                        let data_clone = data.clone();
 
                                         // Process callback query here if needed
                                         let process_result = tokio::spawn(async move {
-                                            Self::safe_process_callback(&bot_clone, &from_clone, &message_clone, &data_clone).await
+                                            Self::safe_process_callback(&bot_clone, &from, &message, &data).await
                                         }).await;
 
                                         if let Err(join_err) = process_result {
