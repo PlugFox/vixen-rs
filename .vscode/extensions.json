@@ -3,7 +3,6 @@
         // Rust development
         "rust-lang.rust-analyzer",
         "vadimcn.vscode-lldb",
-        "serayuzgur.crates",
         // TOML support
         "tamasfe.even-better-toml",
         // Git integration
