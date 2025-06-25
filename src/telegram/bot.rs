@@ -8,7 +8,28 @@ use tracing::{debug, error, info};
 
 use crate::{captcha::CaptchaService, database::DB};
 
-#[derive(Debug, Deserialize)]
+// HTTP client timeouts
+const HTTP_TIMEOUT_SECS: u64 = 30;
+const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
+const HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 60;
+const HTTP_POOL_MAX_IDLE_PER_HOST: usize = 10;
+
+// Telegram API timeouts
+const TELEGRAM_REQUEST_TIMEOUT_SECS: u64 = 12;
+const TELEGRAM_DELETE_TIMEOUT_SECS: u64 = 10;
+const TELEGRAM_BAN_TIMEOUT_SECS: u64 = 10;
+
+// Polling settings
+const POLLING_TIMEOUT_SECS: u64 = 30;
+const POLLING_TIMEOUT_BUFFER_SECS: u64 = 5;
+const POLLING_UPDATE_LIMIT: u8 = 100;
+const POLLING_ERROR_BACKOFF_SECS: u64 = 5;
+const POLLING_PANIC_BACKOFF_SECS: u64 = 10;
+
+// Captcha settings
+const CAPTCHA_EXPIRY_MINUTES: i64 = 5;
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct User {
     // Unique identifier for this user or bot
     pub id: i64,
@@ -24,7 +45,7 @@ pub struct User {
     pub language_code: Option<String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatType {
     #[serde(rename = "private")]
@@ -37,7 +58,7 @@ pub enum ChatType {
     Channel,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Chat {
     // Unique identifier for this chat
     pub id: i64,
@@ -147,17 +168,59 @@ pub struct Message {
     metadata: OnceCell<MessageMetadata>,
 }
 
+impl Clone for Message {
+    fn clone(&self) -> Self {
+        Self {
+            message_id: self.message_id,
+            date: self.date,
+            chat: self.chat.clone(),
+            from: self.from.clone(),
+            reply_to_message: self.reply_to_message.clone(),
+            text: self.text.clone(),
+            entities: self.entities.clone(),
+            story: self.story.clone(),
+            video: self.video.clone(),
+            animation: self.animation.clone(),
+            audio: self.audio.clone(),
+            document: self.document.clone(),
+            photo: self.photo.clone(),
+            sticker: self.sticker.clone(),
+            video_note: self.video_note.clone(),
+            voice: self.voice.clone(),
+            game: self.game.clone(),
+            caption: self.caption.clone(),
+            caption_entities: self.caption_entities.clone(),
+            metadata: OnceCell::new(), // Reset metadata cache in cloned instance
+        }
+    }
+}
+
+/// Incoming callback query
+#[derive(Debug, Deserialize)]
 struct CallbackQuery {
+    // Unique identifier for this query
     id: String,
+
+    // Sender
     from: User,
+
+    // Optional. Message sent by the bot with the callback button that originated the query
     message: Option<Message>,
+
+    // Optional. Data associated with the callback button.
     data: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Update {
+    // The update's unique identifier.
     update_id: i64,
+
+    // Optional. New incoming message of any kind - text, photo, sticker, etc.
     message: Option<Message>,
+
+    // Optional. New incoming callback query
+    callback_query: Option<CallbackQuery>,
 }
 
 impl fmt::Display for Update {
@@ -180,6 +243,8 @@ struct GetUpdates {
     result: Vec<Update>,
 }
 
+/// A Telegram Bot API client that provides comprehensive bot functionality
+/// including message processing, user verification, captcha handling, and anti-spam measures.
 #[derive(Clone)]
 pub struct Bot {
     db: DB,
@@ -188,8 +253,17 @@ pub struct Bot {
     chats: HashSet<i64>,
 }
 
-/// A Telegram Bot API client
+/// A Telegram Bot API client that provides comprehensive bot functionality
 impl Bot {
+    /// Creates a new Bot instance with the given token, allowed chats, and database connection.
+    ///
+    /// # Arguments
+    /// * `token` - The Telegram Bot API token
+    /// * `chats` - List of chat IDs that the bot should monitor (empty means all chats)
+    /// * `db` - Database connection for storing user data, messages, and captchas
+    ///
+    /// # Returns
+    /// A new Bot instance ready to process messages and callbacks
     pub fn new(token: String, chats: Vec<String>, db: DB) -> Self {
         let chats_set: HashSet<i64> = chats
             .iter()
@@ -198,10 +272,10 @@ impl Bot {
         Bot {
             db,
             client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .connect_timeout(Duration::from_secs(10))
-                .pool_idle_timeout(Duration::from_secs(60))
-                .pool_max_idle_per_host(10)
+                .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+                .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+                .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
+                .pool_max_idle_per_host(HTTP_POOL_MAX_IDLE_PER_HOST)
                 .build()
                 .expect("failed to build HTTP client"),
             token: token.to_string(),
@@ -326,7 +400,7 @@ impl Bot {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .json(&payload)
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(TELEGRAM_REQUEST_TIMEOUT_SECS))
             .send()
             .await?;
 
@@ -422,7 +496,7 @@ impl Bot {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .json(&payload)
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(TELEGRAM_DELETE_TIMEOUT_SECS))
             .send()
             .await?;
 
@@ -478,7 +552,7 @@ impl Bot {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .json(&payload)
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(TELEGRAM_BAN_TIMEOUT_SECS))
             .send()
             .await?;
 
@@ -490,18 +564,18 @@ impl Bot {
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
-        let timeout = Duration::from_secs(30); // Default timeout for HTTP requests
+        let timeout = Duration::from_secs(POLLING_TIMEOUT_SECS); // Default timeout for HTTP requests
         let client = Client::builder()
-            .timeout(timeout.add(Duration::from_secs(5))) // A bit longer timeout for Telegram API requests
+            .timeout(timeout.add(Duration::from_secs(POLLING_TIMEOUT_BUFFER_SECS))) // A bit longer timeout for Telegram API requests
             .build()
             .expect("failed to build HTTP client");
 
         let mut offset: i64 = 0;
         info!("starting Telegram polling");
-        let token: &str = &self.token;
+        let token = self.token.clone();
         let chats: HashSet<i64> = self.chats.clone();
         let has_chats = !chats.is_empty();
-        let pool: &DB = &self.db;
+        let bot = self.clone();
 
         tokio::pin!(shutdown_signal);
 
@@ -513,10 +587,10 @@ impl Bot {
                 }
                 result = Self::get_updates(
                     &client, // HTTP client for Telegram API
-                    token, // Telegram Bot API token
+                    &token, // Telegram Bot API token
                     offset, // offset for updates
                     timeout.as_secs(), // timeout in seconds
-                    100, // limit of updates to fetch
+                    POLLING_UPDATE_LIMIT, // limit of updates to fetch
                     vec!["message", "callback_query"]
                 ) => {
                     // Safely handle the result with panic protection
@@ -537,20 +611,19 @@ impl Bot {
                                             continue; // Skip messages from non-configured chats
                                         } else if message.from.is_none() {
                                             debug!("ignoring message without sender from chat#{}", message.chat.id);
-                                            continue; // Skip messages without text or photo
-                                        } /* else if message.text.is_none() && message.caption.is_none() {
-                                            debug!("ignoring message without text or caption from chat#{}", message.chat.id);
-                                            continue; // Skip messages without text or photo
-                                        } */
+                                            continue; // Skip messages without sender
+                                        }
 
                                         info!("processing message from chat#{}", message.chat.id);
 
+                                        // Clone necessary data for the spawned task
+                                        let bot_clone = bot.clone();
+                                        let message_clone = message.clone();
+
                                         // Process message in a separate task to isolate potential panics
-                                        let process_result = tokio::spawn(Self::safe_process_message(
-                                            self.clone(),
-                                            message,
-                                            pool.clone()
-                                        )).await;
+                                        let process_result = tokio::spawn(async move {
+                                            Self::safe_process_message(&bot_clone, &message_clone).await
+                                        }).await;
 
                                         if let Err(join_err) = process_result {
                                             if join_err.is_panic() {
@@ -565,13 +638,60 @@ impl Bot {
                                                 );
                                             }
                                         }
+                                    } else if let Some(callback_query) = upd.callback_query {
+                                        let message = callback_query.message;
+                                        let from = callback_query.from;
+                                        let data = callback_query.data.clone().unwrap_or_default();
+                                        if message.is_none() {
+                                            debug!("ignoring callback query without message");
+                                            continue; // Skip callback queries without a message
+                                        }
+                                        let message = message.unwrap();
+                                        let chat = &message.chat;
+                                        if has_chats && !chats.contains(&chat.id) {
+                                            debug!("ignoring callback query from chat#{}", chat.id);
+                                            continue; // Skip callback queries from non-configured chats
+                                        }
+                                        if from.is_bot || from.id == 0 {
+                                            debug!("ignoring callback query from bot: {}", from.id);
+                                            continue; // Skip callback queries from bots
+                                        }
+
+                                        info!("received callback query from: {:?}", from);
+
+                                        // Clone necessary data for the spawned task
+                                        let bot_clone = bot.clone();
+                                        let from_clone = from.clone();
+                                        let message_clone = message.clone();
+                                        let data_clone = data.clone();
+
+                                        // Process callback query here if needed
+                                        let process_result = tokio::spawn(async move {
+                                            Self::safe_process_callback(&bot_clone, &from_clone, &message_clone, &data_clone).await
+                                        }).await;
+
+                                        if let Err(join_err) = process_result {
+                                            if join_err.is_panic() {
+                                                error!(
+                                                    "panic occurred while processing callback query: {:?}",
+                                                    join_err
+                                                );
+                                            } else {
+                                                error!(
+                                                    "task was cancelled while processing callback query: {:?}",
+                                                    join_err
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        debug!("ignoring update without message or callback_query");
                                     }
                                 }
                             }
                             Err(err) => {
                                 error!(%err, "error polling Telegram ");
                                 // A bit of backoff to avoid hammering the API
-                                tokio::time::sleep(Duration::from_secs(5)).await;
+                                tokio::time::sleep(Duration::from_secs(POLLING_ERROR_BACKOFF_SECS)).await;
                             }
                         }
                     });
@@ -596,7 +716,7 @@ impl Bot {
 
                             error!("panic caught in polling loop: {}", panic_msg);
                             // Add a longer backoff after panic to prevent rapid panic loops
-                            tokio::time::sleep(Duration::from_secs(10)).await;
+                            tokio::time::sleep(Duration::from_secs(POLLING_PANIC_BACKOFF_SECS)).await;
                         }
                     }
                 }
@@ -697,7 +817,7 @@ impl Bot {
             .client
             .post(&url)
             .multipart(form)
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(TELEGRAM_REQUEST_TIMEOUT_SECS))
             .send()
             .await?;
 
@@ -785,7 +905,7 @@ impl Bot {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .json(&payload)
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(TELEGRAM_REQUEST_TIMEOUT_SECS))
             .send()
             .await?;
 
@@ -858,7 +978,7 @@ impl Bot {
             .client
             .post(&url)
             .multipart(form)
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(TELEGRAM_REQUEST_TIMEOUT_SECS))
             .send()
             .await?;
 
@@ -884,15 +1004,49 @@ impl Bot {
         .into())
     }
 
+    /// Safely process a single message from Telegram with panic protection
+    async fn safe_process_message(
+        bot: &Bot,
+        message: &Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Use std::panic::catch_unwind with AssertUnwindSafe to catch any panics
+        // that might occur during message processing
+        let panic_result = std::panic::AssertUnwindSafe(async {
+            bot.process_message(message).await;
+        });
+
+        match std::panic::catch_unwind(move || {
+            tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(panic_result))
+        }) {
+            Ok(_) => {
+                debug!("telegram message processed successfully");
+                Ok(())
+            }
+            Err(panic_info) => {
+                let panic_msg = panic_info
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
+                    .or_else(|| panic_info.downcast_ref::<&str>().copied())
+                    .unwrap_or("unknown panic");
+
+                error!(
+                    "panic caught while processing telegram message: {}",
+                    panic_msg
+                );
+                Err(format!("telegram message processing panic: {}", panic_msg).into())
+            }
+        }
+    }
+
     /// Process a single message from Telegram
-    async fn process_message(&self, message: Message, db: &DB) {
+    async fn process_message(&self, message: &Message) {
         info!(
             "processing message {}: {:?}",
             message.message_id, message.text
         );
 
         // Upsert message and user to database
-        match db.upsert_message(&message).await {
+        match self.db.upsert_message(message).await {
             Ok(_) => {
                 debug!(
                     "successfully upserted message {} to database",
@@ -908,38 +1062,28 @@ impl Bot {
         }
 
         // Check if user verified their identity
-        let user = message.from.as_ref();
-        if user.is_none() {
-            debug!(
-                "message from chat#{} without user, skipping",
-                message.chat.id
-            );
-            return;
-        }
-
-        let user = user.unwrap();
+        let user = match message.from.as_ref() {
+            Some(user) => user,
+            None => {
+                debug!(
+                    "message from chat#{} without user, skipping",
+                    message.chat.id
+                );
+                return;
+            }
+        };
         let user_id = user.id;
         let chat_id = message.chat.id;
         let message_id = message.message_id;
-        debug!("checking user {} in database", user.id);
-        match db.is_user_verified(user_id).await {
-            true => {
-                return; // User is verified, no further action needed
-            }
-            false => {
-                debug!("user {} is not verified", user.id);
-                // Here you would send a verification request to the user
-                // For example, send a message with instructions to verify their identity
-            }
+        debug!("checking user {} verification status", user.id);
+        if self.db.is_user_verified(user_id).await {
+            debug!("user {} is already verified, skipping", user.id);
+            return; // User is verified, no further action needed
         }
 
-        let message_type = message.metadata().message_type;
-        let verification_message = Self::format_message_with_user(
-            user,
-            "Please verify your identity to use this bot. You can do this by sending a verification code or following the instructions provided.",
-        );
+        debug!("user {} is not verified", user.id);
 
-        self.delete_message(chat_id, message_id).await.ok();
+        let message_type = message.metadata().message_type;
 
         static VERY_BAD_TYPES: once_cell::sync::Lazy<HashSet<&'static str>> =
             once_cell::sync::Lazy::new(|| {
@@ -952,20 +1096,31 @@ impl Bot {
                 set
             });
 
-        // Check if the message type is one of the very bad types
+        // Check if the message type is one of the very bad types that require immediate ban
         if VERY_BAD_TYPES.contains(message_type) {
-            // If the message is a media type that requires verification, ban the user
-            db.ban_user(user_id, chat_id, "Send bad type of message", None)
-                .await
-                .unwrap_or_else(|e| {
-                    error!("failed to ban user {}: {}", user.id, e);
-                });
+            // Delete the message first
+            if let Err(e) = self.delete_message(chat_id, message_id).await {
+                error!(
+                    "failed to delete bad message {} from chat {}: {}",
+                    message_id, chat_id, e
+                );
+            }
 
-            self.ban_user(chat_id, user_id, None)
+            // If the message is a media type that requires verification, ban the user
+            if let Err(e) = self
+                .db
+                .ban_user(user_id, chat_id, "Send bad type of message", None)
                 .await
-                .unwrap_or_else(|e| {
-                    error!("failed to ban user {}: {}", user.id, e);
-                });
+            {
+                error!(
+                    "failed to record user ban in database for user {}: {}",
+                    user.id, e
+                );
+            }
+
+            if let Err(e) = self.ban_user(chat_id, user_id, None).await {
+                error!("failed to ban user {} from Telegram: {}", user.id, e);
+            }
 
             info!(
                 "banned user {} for sending unsupported message type: {}",
@@ -977,20 +1132,23 @@ impl Bot {
 
         {
             // Check if the message have a lot of duplicates as a spam
-
-            todo!("implement spam detection logic here");
+            // TODO: implement spam detection logic here
+            debug!("spam detection not implemented yet");
         }
 
         {
-            // Check, maybe the user is already has a captcha
-            match db.check_user_has_captcha(chat_id, user_id).await {
+            // Check if the user already has a captcha
+            match self.db.check_user_has_captcha(chat_id, user_id).await {
                 Ok(true) => {
-                    // User already has a captcha, no need to generate a new one
-                    debug!(
-                        "user {} already has a captcha, skipping verification",
-                        user.id
-                    );
-                    return; // User is alreade has a captcha, no need to generate a new one
+                    // User already has a captcha, delete the new message and skip verification
+                    if let Err(e) = self.delete_message(chat_id, message_id).await {
+                        error!(
+                            "failed to delete message {} from user {} who already has captcha: {}",
+                            message_id, user.id, e
+                        );
+                    }
+                    debug!("user {} already has a captcha, message deleted", user.id);
+                    return;
                 }
                 Ok(false) => {
                     debug!(
@@ -1010,6 +1168,14 @@ impl Bot {
         }
 
         {
+            // Delete the original message first
+            if let Err(e) = self.delete_message(chat_id, message_id).await {
+                error!(
+                    "failed to delete original message {} from user {}: {}",
+                    message_id, user.id, e
+                );
+            }
+
             // Generate a captcha for the user and send it
             let service = CaptchaService::new();
             let captcha = service.generate().await;
@@ -1020,7 +1186,7 @@ impl Bot {
                 user_id,
             );
 
-            let captcha_message_id = self
+            let captcha_message_id = match self
                 .send_photo(
                     chat_id,
                     captcha.bytes,
@@ -1030,55 +1196,57 @@ impl Bot {
                     Some(&*KB_CAPTCHA_MARKUP_ENCODED), // captcha keyboard markup
                 )
                 .await
-                .expect("failed to send verification photo");
+            {
+                Ok(message_id) => message_id,
+                Err(e) => {
+                    error!(
+                        "failed to send verification photo to user {}: {}",
+                        user.id, e
+                    );
+                    return;
+                }
+            };
 
-            db.upsert_captcha(
-                chat_id,
-                user_id,
-                captcha_message_id,
-                &verification_message,
-                &captcha.text,
-                "",
-                chrono::Utc::now()
-                    .add(chrono::Duration::minutes(5))
-                    .timestamp(),
-            )
-            .await
-            .unwrap_or_else(|e| {
+            if let Err(e) = self
+                .db
+                .upsert_captcha(
+                    chat_id,
+                    user_id,
+                    captcha_message_id,
+                    &verification_message,
+                    &captcha.text,
+                    "",
+                    chrono::Utc::now()
+                        .add(chrono::Duration::minutes(CAPTCHA_EXPIRY_MINUTES))
+                        .timestamp(),
+                )
+                .await
+            {
                 error!("failed to upsert captcha for user {}: {}", user.id, e);
-            });
+            } else {
+                debug!("captcha generated and sent to user {}", user.id);
+            }
         }
-
-        // Send verification message to the user
-        /* self.send_text_message(chat_id, &verification_message)
-        .await
-        .unwrap_or_else(|e| {
-            error!(
-                "failed to send verification message to user {}: {}",
-                user.id, e
-            );
-        }); */
-
-        // If the user is not verified, you might want to send them a message
     }
 
     /// Safely process a single message from Telegram with panic protection
-    async fn safe_process_message(
-        bot: Bot,
-        message: Message,
-        db: DB,
+    async fn safe_process_callback(
+        bot: &Bot,
+        user: &User,
+        message: &Message,
+        data: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Use std::panic::catch_unwind with AssertUnwindSafe to catch any panics
         // that might occur during message processing
         let panic_result = std::panic::AssertUnwindSafe(async {
-            bot.process_message(message, &db).await;
+            bot.process_callback(user, message, data).await;
         });
 
         match std::panic::catch_unwind(move || {
             tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(panic_result))
         }) {
             Ok(_) => {
-                debug!("message processed successfully");
+                debug!("telegram callback processed successfully");
                 Ok(())
             }
             Err(panic_info) => {
@@ -1088,10 +1256,93 @@ impl Bot {
                     .or_else(|| panic_info.downcast_ref::<&str>().copied())
                     .unwrap_or("unknown panic");
 
-                error!("panic caught while processing message: {}", panic_msg);
-                Err(format!("message processing panic: {}", panic_msg).into())
+                error!(
+                    "panic caught while processing telegram callback: {}",
+                    panic_msg
+                );
+                Err(format!("telegram callback processing panic: {}", panic_msg).into())
             }
         }
+    }
+
+    async fn process_callback(&self, user: &User, message: &Message, data: &str) {
+        info!("processing callback from user {}: {}", user.id, data);
+
+        let chat_id = message.chat.id;
+        let user_id = user.id;
+
+        // Handle captcha callback data
+        match data {
+            KB_CAPTCHA_ONE => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "1")
+                    .await
+            }
+            KB_CAPTCHA_TWO => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "2")
+                    .await
+            }
+            KB_CAPTCHA_THREE => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "3")
+                    .await
+            }
+            KB_CAPTCHA_FOUR => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "4")
+                    .await
+            }
+            KB_CAPTCHA_FIVE => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "5")
+                    .await
+            }
+            KB_CAPTCHA_SIX => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "6")
+                    .await
+            }
+            KB_CAPTCHA_SEVEN => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "7")
+                    .await
+            }
+            KB_CAPTCHA_EIGHT => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "8")
+                    .await
+            }
+            KB_CAPTCHA_NINE => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "9")
+                    .await
+            }
+            KB_CAPTCHA_ZERO => {
+                self.handle_captcha_digit(chat_id, user_id, message.message_id, "0")
+                    .await
+            }
+            KB_CAPTCHA_REFRESH => {
+                self.handle_captcha_refresh(chat_id, user_id, message.message_id)
+                    .await
+            }
+            KB_CAPTCHA_BACKSPACE => {
+                self.handle_captcha_backspace(chat_id, user_id, message.message_id)
+                    .await
+            }
+            _ => {
+                debug!("unknown callback data: {}", data);
+            }
+        }
+    }
+
+    /// Handle captcha digit input
+    async fn handle_captcha_digit(&self, chat_id: i64, user_id: i64, message_id: i64, digit: &str) {
+        // TODO: Implement captcha digit handling
+        debug!("user {} entered digit: {}", user_id, digit);
+    }
+
+    /// Handle captcha refresh
+    async fn handle_captcha_refresh(&self, chat_id: i64, user_id: i64, message_id: i64) {
+        // TODO: Implement captcha refresh
+        debug!("user {} requested captcha refresh", user_id);
+    }
+
+    /// Handle captcha backspace
+    async fn handle_captcha_backspace(&self, chat_id: i64, user_id: i64, message_id: i64) {
+        // TODO: Implement captcha backspace
+        debug!("user {} pressed backspace", user_id);
     }
 }
 

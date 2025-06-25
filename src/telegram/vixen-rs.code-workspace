@@ -1,0 +1,46 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../vixen"
+		}
+	],
+    "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "rust-analyzer.check.allTargets": true,
+        "rust-analyzer.check.features": "all",
+        "rust-analyzer.cargo.buildScripts.enable": true,
+        "rust-analyzer.procMacro.enable": true,
+        "rust-analyzer.diagnostics.enable": true,
+        "rust-analyzer.inlayHints.parameterHints.enable": true,
+        "rust-analyzer.inlayHints.typeHints.enable": true,
+        "rust-analyzer.inlayHints.chainingHints.enable": true,
+        "rust-analyzer.lens.enable": true,
+        "rust-analyzer.lens.run.enable": true,
+        "rust-analyzer.lens.debug.enable": true,
+        "rust-analyzer.runnables.extraTestBinaryArgs": [
+            "--nocapture"
+        ],
+        "rust-analyzer.runnables.extraEnv": {
+            "RUST_LOG": "debug",
+            "RUST_BACKTRACE": "1"
+        },
+        "terminal.integrated.env.windows": {
+            "RUST_LOG": "debug",
+            "RUST_BACKTRACE": "1"
+        },
+        "terminal.integrated.env.linux": {
+            "RUST_LOG": "debug",
+            "RUST_BACKTRACE": "1"
+        },
+        "terminal.integrated.env.osx": {
+            "RUST_LOG": "debug",
+            "RUST_BACKTRACE": "1"
+        },
+        "rust-analyzer.cargo.targetDir": "target/analyzer",
+        "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
+        "rust-analyzer.workspace.symbol.search.kind": "all_symbols"
+    }
+}
