@@ -5,6 +5,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 //use webp::Encoder;
 
+#[cfg(test)]
+mod tests;
+
 // TODO(plugfox): Check `simd` for performance improvements
 // TODO(plugfox): Split image generation into 3 simultaneous tasks: background, text, and foreground shapes
 // TODO(plugfox): Store generated CAPTCHA images in a BLOB SQLite cache
