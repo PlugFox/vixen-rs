@@ -5,6 +5,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 //use webp::Encoder;
 
+// TODO(plugfox): Check `simd` for performance improvements
+// TODO(plugfox): Split image generation into 3 simultaneous tasks: background, text, and foreground shapes
+
 /// Captcha entity representing a CAPTCHA image
 #[derive(Debug, Serialize)]
 pub struct Captcha {
