@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 
 // TODO(plugfox): Check `simd` for performance improvements
 // TODO(plugfox): Split image generation into 3 simultaneous tasks: background, text, and foreground shapes
+// TODO(plugfox): Store generated CAPTCHA images in a BLOB SQLite cache
 
 /// Captcha entity representing a CAPTCHA image
 #[derive(Debug, Serialize)]
