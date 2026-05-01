@@ -13,6 +13,7 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Added
 
+- `server/bin/server.rs` entry point: HTTP listener on `CONFIG_ADDRESS` (default `0.0.0.0:8000`), SIGINT + SIGTERM listener that fires a shared `CancellationToken`, 30s outer shutdown timeout. Module skeletons under `server/src/{api,telegram,services,jobs,models,database,config,telemetry,utils}/`; `server/build.rs` captures git short-SHA, build date, rust version, profile and target as compile-time env vars exposed via `server/src/build_info.rs`. (server)
 - `server/assets/captcha/DejaVuSans.ttf` (DejaVu Fonts 2.37, permissive license) and `server/assets/captcha/CHANGELOG` — first captcha asset, will be loaded via `include_bytes!` by the M1 digit-pad renderer. Asset immutability rules and bump-on-change protocol are documented in `server/docs/captcha.md`. (server)
 - `docker/docker-compose.yml` and `docker/.env.example` — local dev infrastructure: PostgreSQL 16 + Redis 7 with healthchecks, named volumes (`vixen_pg-data`, `vixen_redis-data`), explicit `name: vixen` project namespace to avoid collisions with other repos that nest compose under a `docker/` directory. (infra)
 - 29 new Claude Code skills covering meta-workflow, server subsystems, website patterns, and infra. Index in [.claude/skills/README.md](.claude/skills/README.md). (infra)
