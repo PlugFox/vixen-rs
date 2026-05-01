@@ -1,2 +1,11 @@
-//! HTTP API surface. M0 placeholder — Axum router + middleware + routes land in #24
-//! (per `server/docs/rules/api-routes.md`).
+//! HTTP API surface — Axum router, response envelope, route handlers.
+
+pub mod response;
+pub mod routes_about;
+pub mod routes_health;
+pub mod server;
+pub mod state;
+
+pub use response::{ApiError, ApiResult};
+pub use server::build_router;
+pub use state::AppState;

@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use vixen_server::{
+    api::{AppState, build_router},
     build_info,
     config::Config,
     database::{Database, Redis},
@@ -51,15 +52,19 @@ async fn main() -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
     spawn_signal_listener(cancel.clone());
 
-    let db = Database::connect(&config)
-        .await
-        .context("postgres connect")?;
+    let db = Arc::new(
+        Database::connect(&config)
+            .await
+            .context("postgres connect")?,
+    );
     db.health_check().await.context("postgres health")?;
     info!("postgres connected");
 
-    let redis = Redis::connect(config.redis_url.clone())
-        .await
-        .context("redis connect")?;
+    let redis = Arc::new(
+        Redis::connect(config.redis_url.clone())
+            .await
+            .context("redis connect")?,
+    );
     info!("redis connected");
 
     // Hot-reload subscription: M4 publishes `chat_config:{chat_id}` invalidations
@@ -68,7 +73,13 @@ async fn main() -> anyhow::Result<()> {
         debug!(channel, payload, "chat_config invalidation received");
     });
 
-    let http_handle = spawn_http(&config.address, cancel.clone())
+    let state = AppState {
+        config: config.clone(),
+        db: db.clone(),
+        redis: redis.clone(),
+    };
+
+    let http_handle = spawn_http(&config.address, state, cancel.clone())
         .await
         .context("HTTP server failed to start")?;
 
@@ -86,18 +97,21 @@ async fn main() -> anyhow::Result<()> {
     }
 
     db.close().await;
+    drop(redis);
     Ok(())
 }
 
-async fn spawn_http(addr: &str, cancel: CancellationToken) -> anyhow::Result<JoinHandle<()>> {
+async fn spawn_http(
+    addr: &str,
+    state: AppState,
+    cancel: CancellationToken,
+) -> anyhow::Result<JoinHandle<()>> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
     info!(address = addr, "HTTP listening");
 
-    // Routes land in #24. Until then the router 404s every path — the listener
-    // existing is what `cargo run` verification needs.
-    let app = axum::Router::<()>::new();
+    let app = build_router(state);
 
     let handle = tokio::spawn(async move {
         let shutdown = async move { cancel.cancelled().await };
