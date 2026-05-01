@@ -1,0 +1,39 @@
+{
+    "recommendations": [
+        // Rust development
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        // TOML support
+        "tamasfe.even-better-toml",
+        // Git integration
+        "eamodio.gitlens",
+        "mhutchie.git-graph",
+        "donjayamanne.githistory",
+        // Database tools
+        "qwtel.sqlite-viewer",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-sqlite",
+        // Docker support
+        "ms-azuretools.vscode-docker",
+        // Utility extensions
+        "usernamehw.errorlens",
+        "gruntfuggly.todo-tree",
+        "streetsidesoftware.code-spell-checker",
+        "ms-vscode.live-server", // Testing
+        "hbenl.vscode-test-explorer",
+        "swellaby.vscode-rust-test-adapter",
+        // Markdown
+        "yzhang.markdown-all-in-one",
+        "shd101wyy.markdown-preview-enhanced",
+        // Performance and Profiling
+        "vadimcn.vscode-lldb",
+        "webfreak.debug",
+        // HTTP Client (for API testing)
+        "humao.rest-client",
+        // Environment files
+        "mikestead.dotenv",
+        // Theme and icons
+        /* "pkief.material-icon-theme",
+        "github.github-vscode-theme" */
+    ]
+}

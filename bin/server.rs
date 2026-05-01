@@ -1,119 +1,97 @@
 use clap::Parser;
 
-use tracing::{debug, info /* trace, warn, error */};
+use tracing::{info /* debug, trace, warn, error */};
 //use tracing_log::log;
-use std::error::Error;
-use tokio::{select, signal, spawn, sync::broadcast};
+use std::sync::Arc;
+use tokio::sync::oneshot;
 use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+use vixen::api;
+use vixen::config;
+use vixen::database;
+use vixen::telegram;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Shutdown channel for graceful shutdown
-    let (shutdown_tx, _) = broadcast::channel::<()>(1);
-
     // Parse command line arguments - this will automatically handle --help
-    let config = Config::parse();
-    init_logging(&config);
-
-    info!("Starting Telegram Bot Server...");
-    debug!("Configuration:");
-    debug!(
-        "  Environment: {}",
-        config.environment.as_deref().unwrap_or("production")
+    let config = Arc::new(config::Config::parse());
+    init_logging(
+        &config.log_level,
+        config.environment.as_deref().unwrap_or("production"),
     );
-    debug!("  Address: {}", config.address);
-    debug!("  Port: {}", config.port);
-    debug!("  Log Level: {}", config.log_level);
 
-    // Start the HTTP server
-    let mut http_shutdown_rx = shutdown_tx.subscribe();
-    let http_shutdown_tx = shutdown_tx.clone();
-    let http_handle = spawn(async move {
-        if let Err(e) = http_server(http_shutdown_rx).await {
-            eprintln!("HTTP server error: {}", e);
-            // при ошибке проталкиваем shutdown
-            let _ = http_shutdown_tx.send(());
-        }
-    });
+    info!("Starting Vixen Service v{}", config::VERSION);
+    /* debug!(
+        "Configuration:\n  Environment: {env}\n  Address: {address}\n  Log Level: {log_level}",
+        env = config.environment.as_deref().unwrap_or("production"),
+        address = config.address,
+        log_level = config.log_level,
+    ); */
 
-    // Start the bot polling
-    let mut bot_shutdown_rx = shutdown_tx.subscribe();
-    let bot_shutdown_tx = shutdown_tx.clone();
-    let bot_handle = spawn(async move {
-        if let Err(e) = bot_polling(bot_shutdown_rx).await {
-            eprintln!("Bot polling error: {}", e);
-            let _ = bot_shutdown_tx.send(());
-        }
-    });
-    info!("Server would start at {}:{}", config.address, config.port);
+    // Initialize database pool
+    let (api_db, bot_db);
+    {
+        // Make copies of the pool for API and Telegram services
+        (api_db, bot_db) = {
+            let pool = database::DB::connect(&config.database).await?;
+            (pool.clone(), pool.clone())
+        };
+    }
+
+    // Channels for graceful shutdowns
+    let (api_tx, api_rx) = oneshot::channel::<()>();
+    let (tg_tx, tg_rx) = oneshot::channel::<()>();
+
+    // Spawn API service
+    let api_handle: tokio::task::JoinHandle<()>;
+    {
+        let (address, secret) = (config.address.clone(), config.secret.clone());
+        let api_shutdown = async {
+            let _ = api_rx.await;
+        };
+        api_handle = tokio::spawn(async move {
+            let server = api::Server::new(address, secret, api_db);
+            server.start(api_shutdown).await;
+        });
+    }
+
+    // Spawn Telegram polling service
+    let tg_handle: tokio::task::JoinHandle<()>;
+    {
+        let (telegram, chats) = (config.telegram.clone(), config.chats.clone());
+        let tg_shutdown = async {
+            let _ = tg_rx.await;
+        };
+        tg_handle = tokio::spawn(async move {
+            // Initialize the bot with the configuration and database
+            let bot = telegram::Bot::new(telegram, chats, bot_db);
+            bot.poll(tg_shutdown).await;
+        });
+    }
 
     // Wait for shutdown signal (Ctrl+C)
-    signal::ctrl_c().await?;
-    let _ = shutdown_tx.send(());
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for shutdown");
+        tracing::info!("shutdown signal received");
+    }
 
-    let _ = http_handle.await;
-    let _ = bot_handle.await;
+    // Notify services to stop
+    let _ = api_tx.send(());
+    let _ = tg_tx.send(());
+
+    // Wait for tasks to complete
+    let _ = api_handle.await;
+    let _ = tg_handle.await;
 
     Ok(())
 }
 
-#[derive(Parser, Debug)]
-#[command(
-    name = "vixen",
-    version,
-    about = "Telegram Bot Server for automatically banning spammers",
-    long_about = "A Telegram bot server that automatically detects and bans spammers in Telegram chats. \
-                  This server provides a REST API and connects to the Telegram Bot API to monitor \
-                  chat messages and take action against spam accounts."
-)]
-pub struct Config {
-    /// Environment to run the server in (CLI > ENV > default)
-    #[arg(
-        short = 'e',
-        long = "env",
-        env = "VIXEN_ENVIRONMENT",
-        default_value = "development",
-        help = "Environment to run the server in (development, production, etc.)",
-        aliases = ["environment", "mode"]
-    )]
-    environment: Option<String>,
-
-    /// Address to bind the server to (CLI > ENV > default)
-    #[arg(
-        short = 'a',
-        long,
-        env = "VIXEN_ADDRESS",
-        default_value = "0.0.0.0",
-        aliases = ["host", "addr"],
-        help = "IP address to bind the server to"
-    )]
-    address: String,
-
-    /// Port to bind the server to (CLI > ENV > default)
-    #[arg(
-        short = 'p',
-        long = "port",
-        env = "VIXEN_PORT",
-        default_value_t = 8080,
-        help = "Port number to bind the server to"
-    )]
-    port: u16,
-
-    /// Level of logging (CLI > ENV > default)
-    /// This can be set to trace, debug, info, warn, or error
-    #[arg(
-        short = 'l',
-        long = "logs",
-        env = "VIXEN_LOGS",
-        default_value = "info",
-        aliases = ["log", "level", "verbose"],
-        help = "Logging level (trace, debug, info, warn, error)"
-    )]
-    log_level: String,
-}
-
-fn init_logging(config: &Config) {
+/// Initialize logging with configurable levels and formats
+/// This function sets up the logging system using `tracing` and `tracing_subscriber`.
+fn init_logging(log_level: &str, environment: &str) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     /* let env_filter = EnvFilter::try_from_env("APP_LOG")
     .or_else(|_| EnvFilter::try_from_default_env())
@@ -122,8 +100,7 @@ fn init_logging(config: &Config) {
     // 1) Фильтр: RUST_LOG=debug или APP_LOG=info
     let env_filter = EnvFilter::builder()
         .with_default_directive(
-            config
-                .log_level
+            log_level
                 .parse()
                 .unwrap_or_else(|_| "info".parse().unwrap()),
         )
@@ -143,7 +120,7 @@ fn init_logging(config: &Config) {
         .expect("Failed to create file appender");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = fmt::layer()
-        .with_ansi(config.environment.as_deref() != Some("production")) // ANSI в dev, plain в prod
+        .with_ansi(environment != "production") // ANSI в dev, plain в prod
         .with_writer(non_blocking)
         .json(); // JSON-формат для парсинга
 
@@ -153,32 +130,4 @@ fn init_logging(config: &Config) {
         .with(console_layer)
         .with(file_layer)
         .init();
-}
-
-/// Start the HTTP server
-async fn http_server(shutdown: broadcast::Receiver<()>) -> Result<(), Box<dyn Error>> {
-    // Здесь запускаете ваш HTTP-сервер, например с hyper или axum:
-    // server.with_graceful_shutdown(async {
-    //     let _ = shutdown.recv().await;
-    // }).await?;
-    Ok(())
-}
-
-/// Start the bot polling loop
-async fn bot_polling(mut shutdown: broadcast::Receiver<()>) -> Result<(), Box<dyn Error>> {
-    loop {
-        select! {
-            _ = shutdown.recv() => {
-                // получили сигнал завершения
-                break;
-            }
-            result = async {
-                // Ваш polling: обращение к Telegram API, работа с БД и т.д.
-            } => {
-                // обработка результата polling
-                let _ = result;
-            }
-        }
-    }
-    Ok(())
 }

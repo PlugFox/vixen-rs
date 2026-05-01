@@ -6,9 +6,24 @@ authors = ["Mike Matiunin <plugfox@gmail.com>"]
 license = "MIT"
 edition = "2024"
 
+# Настройки линтера для всего проекта
+[lints.rust]
+dead_code = "allow"
+unused_variables = "allow"
+
+# Start server and telegram bot,
+# this is the main entry point of the application.
+# cargo run --release --bin server
 [[bin]]
 name = "server"
 path = "bin/server.rs"
+
+# Try to generate WebP image with captcha.
+# This is used for testing purposes.
+# cargo run --release --bin captcha
+[[bin]]
+name = "captcha"
+path = "bin/captcha.rs"
 
 # cargo run --release
 [profile.release]
@@ -19,20 +34,60 @@ panic = "abort"
 strip = true
 
 [dependencies]
+
+# Async runtime
 futures = "0.3.31"
 tokio = { version = "1.48.0", features = ["full"] }
+
+# Utilities
+anyhow = "1.0.98"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.140"
+once_cell = "1.21.3"
 
 # Configuration
 clap = { version = "4.5.53", features = ["derive", "env"] }
 
+# Database
+sqlx = { version = "0.8.6", features = [
+    "sqlite",
+    "runtime-tokio-native-tls",
+    "migrate",
+] }
+
+# HTTP client (for Telegram Bot API polling)
+reqwest = { version = "0.12.20", features = ["json", "multipart"] }
+
+# HTTP server (for API)
+axum = "0.8.4"
+tower = "0.5.2"
+tower-http = { version = "0.6.6", features = [
+    "cors",
+    "trace",
+    "limit",
+    "request-id",
+    "util",
+    "timeout",
+    "compression-full",
+] }
+
+# Captcha image generation
+image = { version = "0.25.6", features = ["webp"] }
+rusttype = "0.9.3"
+rand = "0.9.1"
+
 # Logging
-<<<<<<< dependabot/cargo/tracing-0.1.43
 tracing = "0.1.43"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
-=======
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
->>>>>>> master
+tracing-subscriber = { version = "0.3.20", features = [
+    "env-filter",
+    "fmt",
+    "json",
+] }
 tracing-appender = "0.2.3"
 tracing-log = "0.2.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3.15.0"
