@@ -1,0 +1,196 @@
+[package]
+name = "vixen-server"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Telegram anti-spam bot with captcha gating, spam pipeline, daily reports and a moderator dashboard."
+repository = "https://github.com/PlugFox/vixen-rs"
+homepage = "https://github.com/PlugFox/vixen-rs"
+authors = ["Mike Matiunin <plugfox@gmail.com>"]
+readme = "../README.md"
+
+# Single binary entry. `cargo run --bin server` (or just `cargo run`) starts the
+# HTTP API + teloxide poller + background-job runner under a shared CancellationToken.
+[[bin]]
+name = "server"
+path = "bin/server.rs"
+
+# ── Profiles ──────────────────────────────────────────────────────────────
+# dev: light optimisations so the bot poller and tests aren't crawl-slow.
+[profile.dev]
+opt-level = 1
+debug = true
+incremental = true
+
+# release: balanced — used by docker/Dockerfile.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true
+debug = false
+
+# release-small: optimised for binary size; used by ops images.
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+
+# release-fast: maximum runtime perf at the cost of compile time.
+[profile.release-fast]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
+# ── Dependencies ──────────────────────────────────────────────────────────
+[dependencies]
+
+# Async runtime + sync primitives
+tokio = { version = "1.40", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "fs",
+    "io-util",
+    "net",
+    "signal",
+] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+
+# Web framework
+axum = { version = "0.7", default-features = false, features = [
+    "http1",
+    "http2",
+    "json",
+    "matched-path",
+    "original-uri",
+    "query",
+    "tokio",
+    "tower-log",
+    "tracing",
+] }
+tower = { version = "0.5", default-features = false, features = [
+    "util",
+    "timeout",
+    "limit",
+] }
+tower-http = { version = "0.6", default-features = false, features = [
+    "cors",
+    "trace",
+    "limit",
+    "request-id",
+    "util",
+    "timeout",
+    "compression-full",
+] }
+
+# Telegram bot
+teloxide = { version = "0.13", default-features = false, features = [
+    "macros",
+    "ctrlc_handler",
+    "rustls",
+] }
+
+# Database
+# `default-features = false` drops the `any` feature which would force `sqlx-mysql`
+# into the dependency graph, dragging in `rsa 0.9` (RUSTSEC-2023-0071).
+sqlx = { version = "0.8", default-features = false, features = [
+    "postgres",
+    "runtime-tokio-rustls",
+    "macros",
+    "migrate",
+    "json",
+    "uuid",
+    "chrono",
+] }
+
+# Redis — `redis` for typed client + PubSub, `deadpool-redis` for the pool.
+redis = { version = "0.27", features = ["tokio-comp", "tokio-rustls-comp"] }
+deadpool-redis = { version = "0.18", features = ["rt_tokio_1"] }
+
+# Cache (Moka — in-memory, used in front of Redis for hot lookups).
+moka = { version = "0.12", features = ["future"] }
+
+# OpenAPI / Scalar UI
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-axum = "0.1"
+utoipa-scalar = "0.3"
+
+# Image rasterization (M1 captcha + M3 report charts)
+image = { version = "0.25", default-features = false, features = [
+    "webp",
+    "png",
+    "jpeg",
+] }
+webp = "0.3"
+ab_glyph = "0.2"
+plotters = { version = "0.3", default-features = false, features = [
+    "bitmap_backend",
+    "bitmap_encoder",
+    "all_series",
+] }
+
+# Hashing
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2.6"
+
+# Auth — JWT for the dashboard. `aws_lc_rs` instead of `rust_crypto` so RSA goes
+# through aws-lc rather than the `rsa` crate (RUSTSEC-2023-0071).
+jsonwebtoken = { version = "10", default-features = false, features = [
+    "use_pem",
+    "aws_lc_rs",
+] }
+base64 = "0.22"
+
+# CLI / config
+clap = { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15"
+
+# HTTP client (CAS, OpenAI — used from M2/M3, but pinning now)
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+
+# Errors
+anyhow = "1"
+thiserror = "2"
+
+# Serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# URL parsing (used by config validation)
+url = "2"
+
+# Validation regex (bot-token format check)
+regex = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
+tracing-log = "0.2"
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1"
+wiremock = "0.6"
+tempfile = "3"
+serde_yaml = "0.9"
+
+[build-dependencies]
+chrono = "0.4"
+rustc_version = "0.4"

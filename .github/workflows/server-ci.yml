@@ -1,0 +1,108 @@
+# Server CI — runs on PRs to master and pushes to master that touch server/**.
+#
+# Four jobs run in parallel:
+#   fmt        — cargo fmt --all -- --check
+#   clippy     — cargo clippy --all-targets --all-features -- -D warnings
+#   test       — cargo test --workspace --all-features
+#   sqlx-check — cargo sqlx prepare --check --workspace -- --all-targets
+#
+# Uses SQLX_OFFLINE=true so .sqlx/ cache (committed once SQL queries land) is
+# the source of truth — no live database needed for the build itself.
+
+name: Server CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-ci.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-ci.yml'
+  workflow_dispatch:
+
+# Cancel an in-flight run when a new commit is pushed to the same branch / PR.
+concurrency:
+  group: server-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: 'true'
+  RUST_BACKTRACE: 1
+
+defaults:
+  run:
+    working-directory: server
+
+jobs:
+  # ── Formatting ──────────────────────────────────────────────
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  # ── Clippy ──────────────────────────────────────────────────
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # ── Test ────────────────────────────────────────────────────
+  # Ignored integration tests (e.g. tests/redis_pubsub.rs) are skipped here.
+  # They opt-in via `--ignored` and need a running redis/postgres.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: cargo test --workspace --all-features
+
+  # ── SQLx prepare --check ────────────────────────────────────
+  # Verifies the .sqlx/ offline cache matches the current sqlx::query! macros.
+  # With no queries committed yet (M0), prepare --check is effectively a
+  # build-only smoke test — once M1 lands real query!() calls, the .sqlx/
+  # directory becomes the source of truth and any drift fails this job.
+  sqlx-check:
+    name: SQLx prepare --check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+          # sqlx-cli installation is shared across runs via the cargo bin cache.
+          cache-targets: 'true'
+          cache-on-failure: 'true'
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --version ^0.8 --no-default-features --features postgres,rustls --locked
+        working-directory: .
+      - run: cargo sqlx prepare --check --workspace -- --all-targets

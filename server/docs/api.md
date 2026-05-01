@@ -106,8 +106,8 @@ No auth. `pub_rate_limit_middleware` (~60 req/min per IP).
 
 No auth.
 
-- `GET /health` — `{"status":"ok"}` if DB pool is alive.
-- `GET /about` — `{name, version, commit_hash, started_at}`. No secrets.
+- `GET /health` — `{"status":"ok"|"degraded","checks":{"db":"ok"|"down","redis":"ok"|"down"}}`. Returns 200 if every check is `ok`, 503 otherwise.
+- `GET /about` — `{name, version, commit_hash, built_at, rust_version, profile, target}`. No secrets.
 
 ### OpenAPI (`/scalar`, `/api/v1/openapi.json`)
 

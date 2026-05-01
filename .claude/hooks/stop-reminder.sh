@@ -58,5 +58,8 @@ if $i18n_touched; then
     msg+=$'\n  i18n/ changed -> verify EVERY locale file has the same keys'
 fi
 
-# additionalContext feeds the reminder back into the model without blocking.
-jq -n --arg c "$msg" '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $c}}'
+# `decision: "block"` plus `reason` is the Stop-hook way to surface a reminder
+# back to the model — Stop has no `hookSpecificOutput.additionalContext` field.
+# The `stop_hook_active` guard at the top of this script prevents loops on
+# re-entry (Claude Code re-invokes the hook after the model reacts).
+jq -n --arg c "$msg" '{decision: "block", reason: $c}'

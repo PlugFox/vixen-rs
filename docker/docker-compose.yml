@@ -1,0 +1,99 @@
+# vixen-rs dev infrastructure — PostgreSQL 16 + Redis 7.
+#
+# Bring up:   docker compose -f docker/docker-compose.yml up -d
+# Tear down:  docker compose -f docker/docker-compose.yml down
+# Wipe data:  docker compose -f docker/docker-compose.yml down -v   # destroys named volumes
+#
+# Overrides via docker/.env (gitignored). See docker/.env.example for the canonical knobs
+# and the server-side DATABASE_URL / REDIS_URL used by `cargo run`.
+
+# Explicit project name avoids collisions with other repos that also keep their compose
+# under a `docker/` directory (compose otherwise picks the parent dir name as project,
+# which for `docker/` resolves to literally "docker" — a shared bucket).
+name: vixen
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vixen-postgres
+    restart: unless-stopped
+    command:
+      - "postgres"
+      # Connections — cargo runs ~50 max in vixen-server, dev headroom for sqlx + ad-hoc psql.
+      - "-c"
+      - "max_connections=80"
+      # Memory — tuned for a 1–2 GB dev container.
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=768MB"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      # WAL
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "max_wal_size=1GB"
+      - "-c"
+      - "min_wal_size=80MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      # Planner (SSD)
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      # Logging — surfaces slow queries during dev.
+      - "-c"
+      - "log_min_duration_statement=500"
+      - "-c"
+      - "log_checkpoints=on"
+      # Locale
+      - "-c"
+      - "timezone=UTC"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vixen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vixen_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-vixen}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vixen} -d ${POSTGRES_DB:-vixen}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vixen
+
+  redis:
+    image: redis:7-alpine
+    container_name: vixen-redis
+    restart: unless-stopped
+    # appendonly off, RDB snapshot every 60s if ≥1 key changed — dev-grade durability.
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli PING | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vixen
+
+volumes:
+  pg-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  vixen:
+    driver: bridge

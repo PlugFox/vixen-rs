@@ -1,0 +1,15 @@
+Captcha asset CHANGELOG.
+
+Append-only. Every change here means a NEW file with a new path was added. Existing
+files are never edited (see server/docs/captcha.md → "Asset immutability"). Each entry
+records: date, file path, sha256, source, license, purpose.
+
+────────────────────────────────────────────────────────────────────────────
+2026-05-02  added  server/assets/captcha/DejaVuSans.ttf
+            sha256   7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954
+            source   DejaVu Fonts 2.37, https://sourceforge.net/projects/dejavu/files/dejavu/2.37/
+                     archive sha256 fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7
+            license  Bitstream Vera Fonts License + DejaVu Fonts License (permissive,
+                     bundled in dejavu-fonts-ttf-2.37/LICENSE inside the upstream archive)
+            purpose  Digit-pad renderer for the M1 captcha pipeline (`image` + `ab_glyph`).
+                     Loaded as `&[u8]` via `include_bytes!` per server/docs/captcha.md.
