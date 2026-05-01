@@ -13,6 +13,7 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Added
 
+- `docker/docker-compose.yml` and `docker/.env.example` — local dev infrastructure: PostgreSQL 16 + Redis 7 with healthchecks, named volumes (`vixen_pg-data`, `vixen_redis-data`), explicit `name: vixen` project namespace to avoid collisions with other repos that nest compose under a `docker/` directory. (infra)
 - 29 new Claude Code skills covering meta-workflow, server subsystems, website patterns, and infra. Index in [.claude/skills/README.md](.claude/skills/README.md). (infra)
   - **Meta workflow** (7): `plan-before-code`, `verifiable-goal`, `code-review-self`, `debug-systematically`, `change-impact-assessment`, `pr-description`, `find-external-skill`.
   - **Server foundations** (4): `transaction-discipline`, `tracing-spans`, `connection-pool-tuning`, `serde-strict-deserialization`.
