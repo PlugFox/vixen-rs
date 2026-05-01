@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Hot-reload subscription: M4 publishes `chat_config:{chat_id}` invalidations
     // here when a moderator edits per-chat settings. For now we just log them.
-    let _pubsub_handle = redis.subscribe("chat_config:*", cancel.clone(), |channel, payload| {
+    let pubsub_handle = redis.subscribe("chat_config:*", cancel.clone(), |channel, payload| {
         debug!(channel, payload, "chat_config invalidation received");
     });
 
@@ -93,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
     let join = async {
         let _ = http_handle.await;
         let _ = dispatcher_handle.await;
+        let _ = pubsub_handle.await;
     };
 
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, join).await {

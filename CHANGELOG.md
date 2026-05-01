@@ -15,7 +15,12 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Changed
 
+- `bin/server.rs` now joins the `chat_config:*` Redis pubsub task at shutdown alongside the HTTP server and Telegram dispatcher, so the subscriber's final goodbye log lands inside the 30s drain window. (server)
+- `server/docs/api.md` and `server/docs/observability.md` realigned with the actual `/health` and `/about` response shapes (`/health` reports both `db` and `redis` checks; `/about` exposes `built_at`, `rust_version`, `profile`, `target` rather than `started_at`). `observability.md` also documents the borrowed `RedactedToken<'a>` wrapper alongside the owning secret newtypes. (server)
+
 ### Fixed
+
+- `server/Cargo.toml`: drop the `ttf` feature from `plotters`. The transitive `yeslogic-fontconfig-sys` dependency required `libfontconfig1-dev` on the GitHub Actions runner, which broke `Clippy`, `Test`, and `SQLx prepare --check` in `.github/workflows/server-ci.yml`. Captcha rendering is unaffected — it uses `ab_glyph` directly with `include_bytes!(DejaVuSans.ttf)`. The `ttf` feature can be re-introduced in M3 when chart titles need on-image text, paired with an `apt install` step in CI. (infra)
 
 ### Removed
 

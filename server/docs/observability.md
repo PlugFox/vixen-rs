@@ -73,34 +73,28 @@ Each carries `latency_ms` on completion. Outage diagnosis = `cas` + `error` + `l
 
 ## Redaction
 
-`src/utils/redact.rs::RedactedToken`:
+Two layers:
+
+- **Owning newtypes** in `src/config/secrets.rs` — `BotToken`, `JwtSecret`, `AdminSecret`, `OpenAiKey`. Their `Display`/`Debug` always prints `***redacted***` (no public correlator). Use whenever the value is held in a struct (`Config`, service state).
+- **Borrowed wrapper** in `src/utils/redact.rs::RedactedToken<'a>(pub &'a str)` — preserves the bot-id correlator before the colon so log lines stay searchable. Use at tracing call sites where the raw `&str` is in scope (e.g. inside `Bot::new(token.expose())` paths).
 
 ```rust
-#[derive(Clone)]
-pub struct RedactedToken(String);
+// Borrowed wrapper: keeps the searchable id, redacts the secret half.
+pub struct RedactedToken<'a>(pub &'a str);
 
-impl RedactedToken {
-    pub fn new(s: String) -> Self { Self(s) }
-    pub fn expose(&self) -> &str { &self.0 }   // explicit, audited callers only
-}
-
-impl std::fmt::Display for RedactedToken {
+impl std::fmt::Display for RedactedToken<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = &self.0;
-        if let Some((id, _)) = s.split_once(':') {
-            write!(f, "{}:****", id)
-        } else {
-            write!(f, "****")
+        match self.0.split_once(':') {
+            Some((id, _)) if !id.is_empty() => write!(f, "{id}:****"),
+            _ => f.write_str("****"),
         }
     }
 }
-
-impl std::fmt::Debug for RedactedToken { /* same shape */ }
 ```
 
-Use in any `tracing` field: `tracing::info!(bot = %token, "starting poller")` → logs `bot=12345:****`.
+Use in any `tracing` field: `tracing::info!(bot = %RedactedToken(raw), "starting poller")` → logs `bot=12345:****`. For owning struct fields: `tracing::info!(bot = %config.bot_token, ...)` → logs `bot=***redacted***` (no correlator, but safe).
 
-The same pattern is used for `RedactedJwt` (logs `eyJh***`) and `RedactedInitData` (logs `len=...,user_id=...`).
+`RedactedJwt` (logs `eyJh***`) and `RedactedInitData` (logs `len=...,user_id=...`) follow the same borrowed-wrapper pattern; populated from M2 onwards.
 
 ## What NOT to log at info+
 
@@ -153,10 +147,10 @@ Gated by `CONFIG_METRICS_ENABLED` (default `false` in dev, `true` in prod). Behi
 `GET /health`:
 
 ```json
-{ "status": "ok", "checks": { "db": "ok" } }
+{ "status": "ok", "checks": { "db": "ok", "redis": "ok" } }
 ```
 
-Returns 200 if the DB pool can acquire within 1s, 503 otherwise. Used by load balancer / docker compose `condition: service_healthy`.
+Returns 200 if every probe (Postgres acquire + `SELECT 1`, Redis `PING`) succeeds, 503 with `"status":"degraded"` and the failing component flipped to `"down"` otherwise. Used by load balancer / docker compose `condition: service_healthy`.
 
 ## Tracing in tests
 
