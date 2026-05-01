@@ -28,6 +28,6 @@ clap = { version = "4.5.40", features = ["derive", "env"] }
 
 # Logging
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
 tracing-appender = "0.2.3"
 tracing-log = "0.2.0"
