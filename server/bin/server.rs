@@ -23,6 +23,11 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Arc::new(Config::parse());
 
+    if let Err(e) = config.validate() {
+        eprintln!("configuration error: {e}");
+        std::process::exit(2);
+    }
+
     telemetry::init(&config.log_level);
 
     info!(
@@ -31,6 +36,9 @@ async fn main() -> anyhow::Result<()> {
         rust = build_info::RUST_VERSION,
         built = build_info::BUILD_DATE,
         profile = build_info::BUILD_PROFILE,
+        environment = %config.environment,
+        chats = config.chats.len(),
+        bot_token = %config.bot_token,
         "vixen-server starting"
     );
 
