@@ -1,6 +1,6 @@
 [package]
 name = "vixen-server"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "Telegram anti-spam bot with captcha gating, spam pipeline, daily reports and a moderator dashboard."
