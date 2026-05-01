@@ -28,7 +28,8 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(2);
     }
 
-    telemetry::init(&config.log_level);
+    // Hold the guard until main returns: dropping it flushes the JSON file writer.
+    let _telemetry_guard = telemetry::init(&config.log_level, &config.log_dir);
 
     info!(
         version = build_info::VERSION,

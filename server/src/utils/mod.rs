@@ -1,2 +1,5 @@
 //! Cross-cutting helpers (redaction, validation, normalization, time).
-//! `RedactedToken` and friends land in #23 (per `server/docs/observability.md`).
+
+pub mod redact;
+
+pub use redact::RedactedToken;
