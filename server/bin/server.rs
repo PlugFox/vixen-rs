@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::Parser;
+use teloxide::prelude::*;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -17,6 +18,7 @@ use vixen_server::{
     build_info,
     config::Config,
     database::{Database, Redis},
+    telegram::{WatchedChats, build_dispatcher},
     telemetry,
 };
 
@@ -83,13 +85,18 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("HTTP server failed to start")?;
 
+    let dispatcher_handle = spawn_dispatcher(&config, cancel.clone());
+
     // Future tasks land here under the same `cancel`:
-    //   - teloxide dispatcher (#25)
     //   - background-job runner (M1+)
 
-    match tokio::time::timeout(SHUTDOWN_TIMEOUT, http_handle).await {
-        Ok(Ok(())) => info!("shutdown clean"),
-        Ok(Err(e)) => error!(error = %e, "http task panicked"),
+    let join = async {
+        let _ = http_handle.await;
+        let _ = dispatcher_handle.await;
+    };
+
+    match tokio::time::timeout(SHUTDOWN_TIMEOUT, join).await {
+        Ok(()) => info!("shutdown clean"),
         Err(_) => warn!(
             timeout_secs = SHUTDOWN_TIMEOUT.as_secs(),
             "shutdown timed out, exiting"
@@ -123,6 +130,33 @@ async fn spawn_http(
         }
     });
     Ok(handle)
+}
+
+fn spawn_dispatcher(config: &Config, cancel: CancellationToken) -> JoinHandle<()> {
+    let bot = Bot::new(config.bot_token.expose());
+    let watched = WatchedChats::new(config.chats.iter().copied());
+    info!(
+        chats = watched.len(),
+        "telegram dispatcher: starting polling"
+    );
+
+    let mut dispatcher = build_dispatcher(bot, watched);
+    let shutdown = dispatcher.shutdown_token();
+
+    // Bridge our CancellationToken to teloxide's ShutdownToken: when the global
+    // cancel fires, ask the dispatcher to drain.
+    tokio::spawn(async move {
+        cancel.cancelled().await;
+        info!("telegram dispatcher: shutdown requested");
+        if let Err(e) = shutdown.shutdown() {
+            warn!(error = %e, "telegram dispatcher: shutdown signal not delivered");
+        }
+    });
+
+    tokio::spawn(async move {
+        dispatcher.dispatch().await;
+        info!("telegram dispatcher: stopped");
+    })
 }
 
 fn spawn_signal_listener(cancel: CancellationToken) {
