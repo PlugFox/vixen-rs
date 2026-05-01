@@ -1,2 +1,7 @@
-//! Database layer. M0 placeholder — Postgres pool, Redis pool and pub/sub helper
-//! land in #21 (per `server/docs/database.md`).
+//! Database layer — Postgres pool + Redis pool + pub/sub helper.
+
+pub mod postgres;
+pub mod redis;
+
+pub use postgres::Database;
+pub use redis::{Redis, RedisError};

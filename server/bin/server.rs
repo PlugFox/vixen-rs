@@ -11,8 +11,13 @@ use clap::Parser;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
-use vixen_server::{build_info, config::Config, telemetry};
+use tracing::{debug, error, info, warn};
+use vixen_server::{
+    build_info,
+    config::Config,
+    database::{Database, Redis},
+    telemetry,
+};
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -46,6 +51,23 @@ async fn main() -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
     spawn_signal_listener(cancel.clone());
 
+    let db = Database::connect(&config)
+        .await
+        .context("postgres connect")?;
+    db.health_check().await.context("postgres health")?;
+    info!("postgres connected");
+
+    let redis = Redis::connect(config.redis_url.clone())
+        .await
+        .context("redis connect")?;
+    info!("redis connected");
+
+    // Hot-reload subscription: M4 publishes `chat_config:{chat_id}` invalidations
+    // here when a moderator edits per-chat settings. For now we just log them.
+    let _pubsub_handle = redis.subscribe("chat_config:*", cancel.clone(), |channel, payload| {
+        debug!(channel, payload, "chat_config invalidation received");
+    });
+
     let http_handle = spawn_http(&config.address, cancel.clone())
         .await
         .context("HTTP server failed to start")?;
@@ -53,7 +75,6 @@ async fn main() -> anyhow::Result<()> {
     // Future tasks land here under the same `cancel`:
     //   - teloxide dispatcher (#25)
     //   - background-job runner (M1+)
-    //   - Redis pub/sub subscriber (#21)
 
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, http_handle).await {
         Ok(Ok(())) => info!("shutdown clean"),
@@ -63,6 +84,8 @@ async fn main() -> anyhow::Result<()> {
             "shutdown timed out, exiting"
         ),
     }
+
+    db.close().await;
     Ok(())
 }
 
