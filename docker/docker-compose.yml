@@ -55,7 +55,7 @@ services:
       - "timezone=UTC"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vixen}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vixen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vixen_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-vixen}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
