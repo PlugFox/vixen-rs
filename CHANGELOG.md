@@ -1,0 +1,33 @@
+# Changelog
+
+All notable changes are tracked here using the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+The vixen-rs monorepo ships two artifacts with separate version numbers:
+
+- **server** — Rust crate `vixen-server`, source in [`server/`](server/), versioned in `server/Cargo.toml`.
+- **website** — TypeScript SPA `vixen-website`, source in [`website/`](website/), versioned in `website/package.json`.
+
+Each release entry calls out the affected component(s) via a `(server)` / `(website)` / `(infra)` tag. Skip CHANGELOG updates only for trivial internal-only changes (formatting, comment tweaks, refactors with no behaviour change).
+
+## [Unreleased]
+
+### Added
+
+- 29 new Claude Code skills covering meta-workflow, server subsystems, website patterns, and infra. Index in [.claude/skills/README.md](.claude/skills/README.md). (infra)
+  - **Meta workflow** (7): `plan-before-code`, `verifiable-goal`, `code-review-self`, `debug-systematically`, `change-impact-assessment`, `pr-description`, `find-external-skill`.
+  - **Server foundations** (4): `transaction-discipline`, `tracing-spans`, `connection-pool-tuning`, `serde-strict-deserialization`.
+  - **Server vixen subsystems** (8): `add-telegram-handler`, `add-slash-command`, `captcha-pipeline`, `spam-rule`, `background-job`, `tg-webapp-auth`, `per-chat-config`, `seed-test-chat`.
+  - **Website patterns** (8): `solid-resource-pattern`, `solid-async-cleanup`, `typescript-discriminated-union`, `form-error-ux`, `loading-empty-error-states`, `responsive-breakpoints-telegram`, `interaction-states-kobalte`, `design-tokens-system`.
+  - **Website vixen-specific** (1): `telegram-login-widget`.
+  - **Infra** (1): `infra/github-actions-workflow`.
+
+### Changed
+
+- Updated 10 existing skills with research-derived additions: `server/sqlx-query` (keyset pagination, `ON CONFLICT`), `server/postgres-optimization` (lock strength), `server/rust-error-handling` (`#[from]`, Telegram `inspect_err`), `server/rust-async-tokio` (cancel-safety table), `server/rust-testing` (`sqlx::test` fixtures + corpus tests), `website/add-solid-component` (refs + cleanup), `website/add-i18n-string` (RU plurals + ICU braces), `website/design-anti-patterns` (OLED black, cursor-pointer, motion timing), `website/ui-accessibility` (touch targets + ARIA), `verify-changes` (`.sqlx/` staging + concurrency stress), `docker-multi-stage` (healthcheck + SQLX_OFFLINE), `commit-message` (breaking-change footer + co-author rules). (infra)
+- Roadmap rewritten as M0–M8 (foundation → captcha → spam → reports → web auth/hot-reload → dashboard → public reports + WebApp → SQLite migration → prod webhook). Redis is now a mandatory dependency from M0 (hot caches + `chat_config:{chat_id}` pub/sub for live config reload). Most tunables move out of env vars into `chat_config` (PostgreSQL JSONB, edited from the dashboard). Captcha output switches from PNG to WebP. Daily reports gain MarkdownV2 pseudographics alongside the chart, conditionally emitted. Bot adds `/info <user>` and `/report` commands. (infra)
+
+### Fixed
+
+### Removed
+
+### Security
