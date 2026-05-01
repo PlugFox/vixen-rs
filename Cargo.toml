@@ -27,7 +27,12 @@ serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5.40", features = ["derive", "env"] }
 
 # Logging
+<<<<<<< dependabot/cargo/tracing-0.1.43
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
+=======
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
+>>>>>>> master
 tracing-appender = "0.2.3"
 tracing-log = "0.2.0"
