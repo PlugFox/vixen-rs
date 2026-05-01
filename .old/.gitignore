@@ -1,0 +1,17 @@
+target/
+
+logs/
+
+/config/*
+!/config/template.yaml
+!/config/template.yml
+!/config/template.env
+
+/data/*
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.webp
+*.db-shm
+*.db-wal
