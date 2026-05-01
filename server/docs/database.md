@@ -210,7 +210,7 @@ Defined in `src/database/db.rs`:
 - `min_connections = 5`
 - `acquire_timeout = 10s`
 - `idle_timeout = 600s`
-- `statement_timeout = 30s` (set per connection on acquire via `SET LOCAL statement_timeout`)
+- `statement_timeout = 30s` (set once per pooled connection on connect via `SET statement_timeout` — session-scoped, sticks for the lifetime of the connection)
 
 Wrapped in `Database { pool: PgPool }` and shared as `Arc<Database>` from `AppState`.
 

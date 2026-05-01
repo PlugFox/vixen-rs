@@ -118,7 +118,7 @@ moka = { version = "0.12", features = ["future"] }
 # OpenAPI / Scalar UI
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-axum = "0.1"
-utoipa-scalar = { version = "0.3", features = ["axum"] }
+utoipa-scalar = "0.3"
 
 # Image rasterization (M1 captcha + M3 report charts)
 image = { version = "0.25", default-features = false, features = [

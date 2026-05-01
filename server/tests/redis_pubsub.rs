@@ -2,7 +2,7 @@
 //!
 //! Requires a running Redis on `redis://localhost:6379` (the docker compose
 //! default). Marked `#[ignore]` so default `cargo test` runs do not require
-//! the daemon; opt-in via `cargo test --tests -- --ignored redis`.
+//! the daemon; opt-in via `cargo test --test redis_pubsub -- --ignored`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

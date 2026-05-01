@@ -12,6 +12,7 @@ use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use utoipa_scalar::Scalar;
 
 use crate::api::routes_about::AboutResponse;
 use crate::api::routes_health::{HealthChecks, HealthResponse};
@@ -57,9 +58,18 @@ pub fn build_router(state: AppState) -> Router {
     );
 
     if openapi_ui {
+        // Scalar UI is rendered by `utoipa-scalar` standalone: the spec is
+        // embedded into the served HTML, so the page renders without a second
+        // round-trip to `/api/v1/openapi.json`. Used in standalone mode (rather
+        // than `Servable`) because `utoipa-scalar 0.3` pins `axum 0.8` and we
+        // are still on `axum 0.7`.
+        let scalar_html = Scalar::new(openapi).to_html();
         app = app.route(
             "/scalar",
-            axum::routing::get(|| async { Html(SCALAR_HTML) }),
+            axum::routing::get(move || {
+                let html = scalar_html.clone();
+                async move { Html(html) }
+            }),
         );
     }
 
@@ -71,21 +81,6 @@ pub fn build_router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(cors)
 }
-
-/// Inline Scalar UI loading the spec from `/api/v1/openapi.json`. CDN script,
-/// no static assets needed; gated by `Config::resolve_openapi_ui`.
-const SCALAR_HTML: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>vixen-server API</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-</head>
-<body>
-  <script id="api-reference" data-url="/api/v1/openapi.json"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-</body>
-</html>"#;
 
 fn build_cors(origins: &[String]) -> CorsLayer {
     let layer = CorsLayer::new()

@@ -16,7 +16,13 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 ### Changed
 
 - `bin/server.rs` now joins the `chat_config:*` Redis pubsub task at shutdown alongside the HTTP server and Telegram dispatcher, so the subscriber's final goodbye log lands inside the 30s drain window. (server)
+- `bin/server.rs` shutdown signal listener is now `cfg(unix)`-gated. On Unix it still watches both `SIGTERM` and `SIGINT` (production deploys); on non-Unix it falls back to `tokio::signal::ctrl_c()` so the binary builds for `cargo check` / IDE workflows on Windows. (server)
+- `/scalar` UI is now rendered by `utoipa-scalar` in standalone mode (`Scalar::new(spec).to_html()`): the OpenAPI document is embedded directly into the served HTML, so the page renders without the second round-trip to `/api/v1/openapi.json`. Standalone (rather than `Servable`) is chosen because `utoipa-scalar 0.3` pins `axum 0.8` while the project is on `axum 0.7`. (server)
 - `server/docs/api.md` and `server/docs/observability.md` realigned with the actual `/health` and `/about` response shapes (`/health` reports both `db` and `redis` checks; `/about` exposes `built_at`, `rust_version`, `profile`, `target` rather than `started_at`). `observability.md` also documents the borrowed `RedactedToken<'a>` wrapper alongside the owning secret newtypes. (server)
+- `server/docs/database.md` now correctly describes the per-connection `statement_timeout` as session-scoped `SET` applied once on connect (matching `Database::after_connect` in `server/src/database/postgres.rs`), rather than `SET LOCAL` (which would only last for one transaction). (server)
+- `CONFIG_CORS_ORIGINS` doc-comment in `server/src/config/mod.rs` clarified: the `http://localhost:3000` default is the dev dashboard origin; production must override with the explicit dashboard origin, and an empty value disables cross-origin access entirely. (server)
+- `server/config/template.env` instructs to copy to `server/.env` (matching `dotenvy::dotenv()` default search path) instead of the previously-documented `server/.env.local`. (server)
+- `server/tests/redis_pubsub.rs` opt-in command corrected to `cargo test --test redis_pubsub -- --ignored`. (server)
 
 ### Fixed
 

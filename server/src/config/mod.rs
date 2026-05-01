@@ -66,7 +66,9 @@ pub struct Config {
     #[arg(long, env = "CONFIG_OPENAPI_UI")]
     pub openapi_ui: Option<bool>,
 
-    /// CORS allowed origins. **No wildcards.** Empty = no cross-origin access.
+    /// CORS allowed origins. **No wildcards.** Default: `http://localhost:3000`
+    /// (dev dashboard). Production must override with the explicit dashboard
+    /// origin; pass an empty value to disable cross-origin access entirely.
     #[arg(long, env = "CONFIG_CORS_ORIGINS", value_delimiter = ',',
           default_values_t = vec!["http://localhost:3000".to_string()])]
     pub cors_origins: Vec<String>,

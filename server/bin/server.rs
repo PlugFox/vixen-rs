@@ -9,7 +9,6 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::Parser;
 use teloxide::prelude::*;
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -160,13 +159,34 @@ fn spawn_dispatcher(config: &Config, cancel: CancellationToken) -> JoinHandle<()
     })
 }
 
+/// Listen for shutdown signals and fire the global cancel.
+///
+/// Production deploys are Linux containers, so the Unix path watches both
+/// SIGTERM (orchestrator stop) and SIGINT (interactive Ctrl-C). The non-Unix
+/// path falls back to `ctrl_c()` so the binary still builds on Windows for
+/// `cargo check` / IDE workflows.
+#[cfg(unix)]
 fn spawn_signal_listener(cancel: CancellationToken) {
+    use tokio::signal::unix::{SignalKind, signal};
+
     tokio::spawn(async move {
         let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
         let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
         tokio::select! {
             _ = sigterm.recv() => info!("SIGTERM received, shutting down"),
             _ = sigint.recv() => info!("SIGINT received, shutting down"),
+        }
+        cancel.cancel();
+    });
+}
+
+#[cfg(not(unix))]
+fn spawn_signal_listener(cancel: CancellationToken) {
+    tokio::spawn(async move {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            warn!(error = %e, "ctrl_c listener failed; cancelling immediately");
+        } else {
+            info!("Ctrl-C received, shutting down");
         }
         cancel.cancel();
     });
