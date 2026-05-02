@@ -17,7 +17,6 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}/server",
-      "envFile": "${workspaceFolder}/server/config/.env",
       "env": {
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "info,vixen=debug,sqlx=warn,teloxide=info"
@@ -41,7 +40,6 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}/server",
-      "envFile": "${workspaceFolder}/server/.env",
       "env": { "RUST_BACKTRACE": "1" },
       "sourceLanguages": ["rust"]
     },

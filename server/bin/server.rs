@@ -33,7 +33,12 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Best-effort .env load for local dev; production injects vars via the orchestrator.
-    let _ = dotenvy::dotenv();
+    // First match wins, so an explicit `.env` in CWD overrides the repo template path.
+    for path in [".env", "config/.env"] {
+        if dotenvy::from_filename(path).is_ok() {
+            break;
+        }
+    }
 
     let config = Arc::new(Config::parse());
 
