@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO report_messages (chat_id, report_date, kind, telegram_message_id)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (chat_id, report_date, kind) DO UPDATE\n            SET telegram_message_id = EXCLUDED.telegram_message_id,\n                generated_at        = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "661889049ea8af779a2d58b8f23a5f588a81a29d5607387dc9e9d853b97240d8"
+}

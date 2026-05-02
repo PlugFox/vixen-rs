@@ -1,6 +1,6 @@
 [package]
 name = "vixen-server"
-version = "0.3.8"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -132,6 +132,7 @@ plotters = { version = "0.3", default-features = false, features = [
     "bitmap_backend",
     "bitmap_encoder",
     "all_series",
+    "ab_glyph",
 ] }
 
 # Hashing
@@ -171,6 +172,7 @@ serde_json = "1"
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }

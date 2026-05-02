@@ -33,6 +33,7 @@ use teloxide::types::{ChatId, ChatMemberKind, InputFile};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
+use crate::models::daily_stats::{self, Metric};
 use crate::models::moderation_action::ActorKind;
 use crate::services::captcha::caption::caption_initial;
 use crate::services::captcha::short_id;
@@ -51,6 +52,16 @@ pub async fn handle(bot: Bot, msg: Message, state: AppState) -> Result<()> {
     let chat_id = msg.chat.id;
     let user_id = user.id;
     let uid = user_id.0 as i64;
+
+    // Activity counter — every observed message increments `messages_seen`
+    // regardless of admin / verified state. Admins post real activity, and
+    // unverified-user messages still count as "noise the bot saw" before the
+    // captcha gate deletes them. Failure to bump never blocks the gate.
+    if let Err(e) =
+        daily_stats::increment(state.db.pool(), chat_id.0, Metric::MessagesSeen, 1).await
+    {
+        warn!(error = ?e, "daily_stats messages_seen bump failed");
+    }
 
     if is_chat_admin(&bot, &state, chat_id.0, uid).await {
         return Ok(());
@@ -219,7 +230,15 @@ async fn run_spam_pipeline(state: &AppState, msg: &Message, chat_id: i64, user_i
     };
 
     let (action, ctx) = match verdict {
-        Verdict::Allow => return,
+        Verdict::Allow => {
+            // Optionally log the message body for the AI-summary feature.
+            // Gated per-chat by `chat_config.log_allowed_messages` (default
+            // FALSE). Best-effort: a logging hiccup must not break delivery.
+            if let Err(e) = log_allowed_message(state, msg, chat_id, user_id).await {
+                warn!(error = ?e, "log_allowed_messages failed");
+            }
+            return;
+        }
         Verdict::Delete { reason_json } => (
             Action::Delete {
                 reason: reason_json.to_string(),
@@ -255,4 +274,47 @@ async fn run_spam_pipeline(state: &AppState, msg: &Message, chat_id: i64, user_i
     } else {
         info!(chat_id, user_id, "spam verdict applied");
     }
+}
+
+/// Append a message body to `allowed_messages` when
+/// `chat_config.log_allowed_messages = TRUE`. Caller-side decision (the
+/// spam pipeline returned `Allow`); this function only checks the chat's
+/// opt-in flag. ON CONFLICT DO NOTHING so duplicate updates from teloxide
+/// retries don't error.
+async fn log_allowed_message(
+    state: &AppState,
+    msg: &Message,
+    chat_id: i64,
+    user_id: i64,
+) -> anyhow::Result<()> {
+    let enabled: Option<bool> = sqlx::query_scalar!(
+        r#"SELECT log_allowed_messages FROM chat_config WHERE chat_id = $1"#,
+        chat_id,
+    )
+    .fetch_optional(state.db.pool())
+    .await?;
+    if !enabled.unwrap_or(false) {
+        return Ok(());
+    }
+    let Some(text) = msg.text() else {
+        return Ok(());
+    };
+    let username = msg.from.as_ref().and_then(|u| u.username.clone());
+    let length = text.chars().count() as i32;
+    sqlx::query!(
+        r#"
+        INSERT INTO allowed_messages (chat_id, message_id, user_id, username, kind, length, content)
+        VALUES ($1, $2, $3, $4, 'text', $5, $6)
+        ON CONFLICT (chat_id, message_id) DO NOTHING
+        "#,
+        chat_id,
+        msg.id.0 as i64,
+        user_id,
+        username,
+        length,
+        text,
+    )
+    .execute(state.db.pool())
+    .await?;
+    Ok(())
 }

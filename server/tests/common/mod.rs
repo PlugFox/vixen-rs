@@ -23,7 +23,10 @@ use vixen_server::database::{Database, Redis};
 use vixen_server::services::captcha::{CaptchaService, CaptchaState, Fonts};
 use vixen_server::services::cas_client::CasClient;
 use vixen_server::services::moderation_service::ModerationService;
+use vixen_server::services::openai_client::OpenAiClient;
+use vixen_server::services::report_service::ReportService;
 use vixen_server::services::spam::service::SpamService;
+use vixen_server::services::summary_service::SummaryService;
 
 /// Default supergroup ID used across handler tests.
 pub const CHAT_ID: i64 = -1001234567890;
@@ -126,6 +129,9 @@ pub async fn make_state(pool: PgPool, redis: Arc<Redis>, bot: Bot) -> AppState {
     let cas = CasClient::new(redis.clone(), "http://localhost:0".to_string());
     let spam = Arc::new(SpamService::new(pool.clone(), cas));
     let moderation = ModerationService::new(pool.clone(), bot);
+    let reports = Arc::new(ReportService::new(pool.clone()));
+    let openai = Arc::new(OpenAiClient::new("http://localhost:0".to_string()));
+    let summary = SummaryService::new(pool.clone(), openai);
 
     AppState {
         config: Arc::new(test_config()),
@@ -135,5 +141,7 @@ pub async fn make_state(pool: PgPool, redis: Arc<Redis>, bot: Bot) -> AppState {
         captcha_state,
         spam,
         moderation,
+        reports,
+        summary,
     }
 }

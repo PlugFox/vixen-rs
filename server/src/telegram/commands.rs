@@ -22,4 +22,15 @@ pub enum Command {
     /// Id-mode only: `/unban <user_id>`.
     #[command(description = "lift a ban by user_id (moderator)")]
     Unban(String),
+    /// Inline last-24h activity summary (moderator-only, 60s cooldown).
+    #[command(description = "last 24h activity summary (moderator)")]
+    Stats,
+    /// On-demand full daily report (moderator-only). Re-runs delete the
+    /// prior day's report messages and post a fresh pair.
+    #[command(description = "post the daily report now (moderator)")]
+    Report,
+    /// AI-generated summary of recent chat activity (moderator-only).
+    /// Requires `chat_config.openai_api_key` set for this chat.
+    #[command(description = "AI summary of recent chat (moderator)")]
+    Summary,
 }

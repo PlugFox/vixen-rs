@@ -27,6 +27,7 @@ use teloxide::dptree;
 use teloxide::prelude::*;
 use teloxide_tests::{MockBot, MockMessageText, MockSupergroupChat, MockUser};
 use vixen_server::api::AppState;
+use vixen_server::models::daily_stats::{self, Metric};
 use vixen_server::telegram::handlers::message_gate;
 
 const REDIS_URL: &str = "redis://localhost:6379/11";
@@ -172,4 +173,122 @@ async fn verified_user_phrase_match_deletes_via_moderation_ledger(pool: PgPool) 
         Some("delete"),
         "expected 'delete' ledger"
     );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres + redis"]
+async fn message_gate_bumps_messages_seen(pool: PgPool) {
+    // Every observable message bumps `daily_stats(messages_seen)`. Verified
+    // for the verified-user fast-path; the unverified branch is asserted in
+    // `bumps_messages_seen_for_unverified` below.
+    let chat_id = unique_chat_id();
+    seed_chat(&pool, chat_id).await;
+    let redis = fresh_redis(REDIS_URL).await;
+
+    const POSTER: u64 = 9101;
+    seed_verified(&pool, chat_id, POSTER as i64).await;
+
+    let msg = text_message(chat_id, POSTER, "ping");
+    let mock = MockBot::new(msg, handler());
+    let state = make_state(pool.clone(), Arc::clone(&redis), mock.bot.clone()).await;
+    mock.dependencies(dptree::deps![state]);
+    mock.dispatch().await;
+
+    let v = daily_stats::get(
+        &pool,
+        chat_id,
+        chrono::Utc::now().date_naive(),
+        Metric::MessagesSeen,
+    )
+    .await
+    .unwrap();
+    assert_eq!(v, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres + redis"]
+async fn message_gate_bumps_messages_seen_for_unverified(pool: PgPool) {
+    // Even a captcha-deleted message increments messages_seen — it's the
+    // "noise the bot saw" baseline that `report_min_activity` measures.
+    let chat_id = unique_chat_id();
+    seed_chat(&pool, chat_id).await;
+    let redis = fresh_redis(REDIS_URL).await;
+
+    const POSTER: u64 = 9102;
+    let msg = text_message(chat_id, POSTER, "first message ever");
+    let mock = MockBot::new(msg, handler());
+    let state = make_state(pool.clone(), Arc::clone(&redis), mock.bot.clone()).await;
+    mock.dependencies(dptree::deps![state]);
+    mock.dispatch().await;
+
+    let v = daily_stats::get(
+        &pool,
+        chat_id,
+        chrono::Utc::now().date_naive(),
+        Metric::MessagesSeen,
+    )
+    .await
+    .unwrap();
+    assert_eq!(v, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres + redis"]
+async fn allowed_messages_logging_respects_chat_config_off(pool: PgPool) {
+    // Default is `log_allowed_messages = FALSE` — the spam-pipeline Allow
+    // path must NOT write to allowed_messages until a moderator opts in.
+    let chat_id = unique_chat_id();
+    seed_chat(&pool, chat_id).await;
+    let redis = fresh_redis(REDIS_URL).await;
+
+    const POSTER: u64 = 9103;
+    seed_verified(&pool, chat_id, POSTER as i64).await;
+
+    let msg = text_message(
+        chat_id,
+        POSTER,
+        "totally innocent chat message that's long enough",
+    );
+    let mock = MockBot::new(msg, handler());
+    let state = make_state(pool.clone(), Arc::clone(&redis), mock.bot.clone()).await;
+    mock.dependencies(dptree::deps![state]);
+    mock.dispatch().await;
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM allowed_messages WHERE chat_id = $1")
+        .bind(chat_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "logging off → no allowed_messages rows");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres + redis"]
+async fn allowed_messages_logging_writes_when_opted_in(pool: PgPool) {
+    let chat_id = unique_chat_id();
+    seed_chat(&pool, chat_id).await;
+    sqlx::query("UPDATE chat_config SET log_allowed_messages = TRUE WHERE chat_id = $1")
+        .bind(chat_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let redis = fresh_redis(REDIS_URL).await;
+
+    const POSTER: u64 = 9104;
+    seed_verified(&pool, chat_id, POSTER as i64).await;
+
+    let body = "totally innocent chat message that's long enough to satisfy spam pipeline";
+    let msg = text_message(chat_id, POSTER, body);
+    let mock = MockBot::new(msg, handler());
+    let state = make_state(pool.clone(), Arc::clone(&redis), mock.bot.clone()).await;
+    mock.dependencies(dptree::deps![state]);
+    mock.dispatch().await;
+
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT content FROM allowed_messages WHERE chat_id = $1")
+            .bind(chat_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored.as_deref(), Some(body));
 }

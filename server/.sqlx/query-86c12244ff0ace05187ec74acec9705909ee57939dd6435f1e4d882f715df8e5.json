@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO daily_stats (chat_id, date, kind, value)\n        VALUES ($1, CURRENT_DATE, $2, $3)\n        ON CONFLICT (chat_id, date, kind) DO UPDATE\n            SET value = daily_stats.value + EXCLUDED.value\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86c12244ff0ace05187ec74acec9705909ee57939dd6435f1e4d882f715df8e5"
+}

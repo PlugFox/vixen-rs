@@ -22,7 +22,10 @@ use vixen_server::{
     services::captcha::{CaptchaService, CaptchaState, Fonts},
     services::cas_client::CasClient,
     services::moderation_service::ModerationService,
+    services::openai_client::OpenAiClient,
+    services::report_service::ReportService,
     services::spam::service::SpamService,
+    services::summary_service::SummaryService,
     telegram::commands::Command,
     telegram::{WatchedChats, build_dispatcher},
     telemetry,
@@ -108,6 +111,10 @@ async fn main() -> anyhow::Result<()> {
     let spam = Arc::new(SpamService::new(db.pool().clone(), cas));
     let moderation = ModerationService::new(db.pool().clone(), bot.clone());
 
+    let reports = Arc::new(ReportService::new(db.pool().clone()));
+    let openai = Arc::new(OpenAiClient::new(config.openai_base_url.clone()));
+    let summary = SummaryService::new(db.pool().clone(), openai);
+
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
@@ -116,6 +123,8 @@ async fn main() -> anyhow::Result<()> {
         captcha_state: captcha_state.clone(),
         spam: spam.clone(),
         moderation: moderation.clone(),
+        reports: reports.clone(),
+        summary: summary.clone(),
     };
 
     let http_handle = spawn_http(&config.address, state.clone(), cancel.clone())

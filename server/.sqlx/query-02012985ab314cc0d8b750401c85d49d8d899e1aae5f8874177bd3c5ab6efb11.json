@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(SUM(value), 0)::BIGINT AS \"sum!\"\n            FROM daily_stats\n            WHERE chat_id = $1 AND kind = $2 AND date >= $3 AND date <= $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sum!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "02012985ab314cc0d8b750401c85d49d8d899e1aae5f8874177bd3c5ab6efb11"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM report_messages\n        WHERE chat_id = $1 AND report_date = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d00f2315883b0a8640f14a8da3d45ac06a12de1e6542cf40cc349b718075a965"
+}

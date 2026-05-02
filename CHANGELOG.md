@@ -11,6 +11,51 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Added
+
+- M3 daily reports. Per-chat scheduler fires at the chat-local hour
+  (`chat_config.report_hour` in `chat_config.timezone`), aggregates the
+  chat-local day from `daily_stats` + `moderation_actions` +
+  `spam_messages_per_chat`, posts a MarkdownV2 message and a 480×270
+  lossless WebP chart, and records both message ids in `report_messages`
+  for replace-on-redo. Below `chat_config.report_min_activity` the day is
+  silently skipped. (server)
+- `daily_stats` counter pipeline. `models::daily_stats::increment` UPSERT
+  helper is wired into the message gate (`messages_seen` +
+  `allowed_messages` logging when opted-in), `ModerationService` (deleted
+  / banned / verified), `CaptchaService` (issued / solved / expired) and
+  the captcha-expiry job. (server)
+- `daily_stats::try_reserve` — atomic budget-gated reservation. The
+  `/summary` token budget check + increment is now a single SQL statement
+  (`INSERT … ON CONFLICT DO UPDATE … WHERE value+delta <= budget`), so
+  concurrent callers can't both observe the same remaining budget and both
+  proceed. (server)
+- `/stats` slash command: in-chat snapshot for the chat-local day
+  (moderator-only, 60s Redis cooldown). (server)
+- `/report` slash command: on-demand full daily report, replaces today's
+  prior pair. (server)
+- `/summary` slash command: AI summary of recent chat activity. Per-chat
+  OpenAI key (`chat_config.openai_api_key`); replies with a clear hint
+  when the key, message logging, or daily token budget is missing. When
+  `chat_config.log_allowed_messages = FALSE` the service short-circuits
+  to `SkipReason::NoMessages` so disabled logging never feeds previously
+  captured rows to OpenAI. (server)
+- `SummaryService` + `OpenAiClient`. Sanitises URLs / phones / emails /
+  @-mentions before sending to OpenAI, retries 429 / 5xx with exponential
+  backoff (Retry-After honoured), accumulates `daily_stats('openai_tokens_used')`
+  and hard-caps at `chat_config.summary_token_budget`. (server)
+- `chat_config` columns `report_min_activity`, `openai_api_key`,
+  `openai_model`, `language` (per-chat report locale, RU / EN). (server)
+- `report_messages` rebuilt around `(chat_id, report_date, kind)` to
+  carry both the report's text and chart messages and support
+  replace-on-redo. (server)
+- `spam_messages_per_chat(chat_id, xxh3_hash, hit_count, last_seen)` —
+  chat-scoped counter behind the global `spam_messages` dedup table. The
+  daily-report "top phrases" query now joins through the per-chat counter
+  so phrases never leak between chats. (server)
+- `CONFIG_OPENAI_BASE_URL` env var (override only for tests / proxies).
+  (server)
+
 ### Security
 
 - captcha photo is sent with `protect_content=true`, blocking forwarding,
@@ -22,6 +67,45 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Fixed
 
+- M3 reports now compute the report window in the chat's IANA timezone
+  via `report_service::day_window_local(date, tz)`. Previously the
+  scheduler and `/report` passed a chat-local `report_date` through
+  `day_window_utc`, which interpreted the boundaries as UTC midnight; for
+  any non-UTC chat the aggregation window included several hours from
+  the wrong day and missed several hours from the intended one. (server)
+- `report_message::already_posted_today` now requires both the text and
+  the photo rows to be present before treating a day as posted. If
+  `deliver()` succeeded on the text message but failed on the chart, the
+  next 5-min scheduler tick would previously skip the day forever; it
+  now retries the missing half. (server)
+- daily-report "top phrases" no longer leak across chats. `spam_messages`
+  is corpus-global (xxh3-keyed dedup), so the previous query exposed
+  phrases that only fired in chat B in chat A's report. The aggregator
+  now reads the chat-scoped `spam_messages_per_chat` counter via a JOIN
+  on the global sample-body row. (server)
+- `/stats` window matches its header copy. The previous "за 24 часа"
+  label summed two whole `daily_stats.date` buckets (since the storage
+  is UTC-bucketed and the query used `[from.date(), to.date()]`); the
+  command now reports a chat-local "today so far" snapshot under
+  "Сводка за сегодня". (server)
+- `summary_service` no longer feeds previously captured `allowed_messages`
+  rows to OpenAI when the moderator subsequently flips
+  `chat_config.log_allowed_messages` off — the gate now sits at the top
+  of `summarize` and short-circuits to `SkipReason::NoMessages`. (server)
+- `report_service::aggregate` integration tests are now `#[ignore]`-gated
+  the same way every other live-Postgres test is, so the unit-test job
+  no longer panics on `DATABASE_URL must be set` when `#[sqlx::test]`
+  acquires its pool. (server)
+- the three `*_rejects_non_moderator` handler tests pre-seed an empty
+  admin cache in Redis so the moderator-or-admin gate never falls
+  through to `bot.get_chat_administrators` (unmocked by
+  `teloxide_tests` 0.2). (server)
+- removed the unused `CONFIG_WEBAPP_BASE_URL` knob — the M3 PR
+  introduced and documented it but no code reads it. The dashboard
+  deep-link feature lands with M4. (server)
+- `docs/reports/sample.md`'s outer fence switched from triple-backtick to
+  triple-tilde so the inner triple-backtick blocks (Telegram's monospace
+  fences) survive intact. (server)
 - spam pipeline's `MIN_NORMALIZED_LEN = 48` cutoff now compares character
   count, not byte length. Previously `normalized.len()` short-circuited
   Cyrillic messages around 24 chars (UTF-8 codepoints are 2+ bytes), which

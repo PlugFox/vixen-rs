@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT report_hour, timezone, report_min_activity, language, summary_enabled\n        FROM chat_config\n        WHERE chat_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "report_hour",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "timezone",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "report_min_activity",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "language",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "summary_enabled",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1fdb7254b39bfb586ade1c6e240a1ce5831e0b883362ddba198ea7b2cbf0769b"
+}

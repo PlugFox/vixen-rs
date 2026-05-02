@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO daily_stats AS ds (chat_id, date, kind, value)\n        VALUES ($1, CURRENT_DATE, $2, $3)\n        ON CONFLICT (chat_id, date, kind) DO UPDATE\n            SET value = ds.value + EXCLUDED.value\n        WHERE ds.value + EXCLUDED.value <= $4\n        RETURNING value\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "577efdd8db302a6fca47c30e42d9ad6911362c283841a26f9bcf62d83582ef90"
+}

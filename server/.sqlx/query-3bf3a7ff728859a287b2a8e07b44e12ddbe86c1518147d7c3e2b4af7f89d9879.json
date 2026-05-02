@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT value\n        FROM daily_stats\n        WHERE chat_id = $1 AND date = $2 AND kind = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3bf3a7ff728859a287b2a8e07b44e12ddbe86c1518147d7c3e2b4af7f89d9879"
+}

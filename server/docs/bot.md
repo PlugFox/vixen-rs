@@ -53,7 +53,9 @@ This is the **single source of truth** for "is this chat ours". Don't re-check i
 | `/verify <user_id>` or `/verify` (reply) | moderator | Force-verify a user without captcha. Records `moderation_actions` row with `actor_kind = 'moderator'`. |
 | `/ban` (reply) or `/ban <user_id>` | moderator | Ban a user. Optional reason as remaining args. |
 | `/unban <user_id>` | moderator | Lift a ban. |
-| `/stats` | moderator | Inline summary of last 24h: messages, captchas, bans, spam hits, top phrases. |
+| `/stats` | moderator | Inline summary of last 24h: messages, captchas, bans, spam hits, top phrases. 60s per-chat cooldown. |
+| `/report` | moderator | Posts the full daily report (text + chart + optional AI-summary caption) for today. Replaces today's prior pair via `report_messages` UPSERT. |
+| `/summary` | moderator | AI-generated summary of the last 24h. Replies with a clear hint when `chat_config.openai_api_key` is unset, `summary_enabled` is false, message logging is off, or the per-chat token budget is exhausted. 60s cooldown. |
 
 Permission check is `is_moderator(chat_id, user_id)` against `chat_moderators`. Non-moderator gets a localized "not allowed" reply.
 

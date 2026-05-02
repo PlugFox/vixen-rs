@@ -2,6 +2,7 @@
 //! summary generation). See `server/docs/rules/background-jobs.md`.
 
 pub mod captcha_expiry;
+pub mod daily_report;
 pub mod spam_cleanup;
 
 use teloxide::prelude::*;
@@ -21,6 +22,10 @@ pub fn spawn_all(bot: Bot, state: AppState, shutdown: CancellationToken) -> Vec<
         spawn_named(
             captcha_expiry::NAME,
             captcha_expiry::run(bot.clone(), state.clone(), shutdown.clone()),
+        ),
+        spawn_named(
+            daily_report::NAME,
+            daily_report::run(bot.clone(), state.clone(), shutdown.clone()),
         ),
         spawn_named(spam_cleanup::NAME, spam_cleanup::run(bot, state, shutdown)),
     ]
