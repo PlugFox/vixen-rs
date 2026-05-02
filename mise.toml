@@ -1,0 +1,193 @@
+# mise — local toolchain, env defaults, and task runner for vixen-rs.
+#
+# Install / refresh tools:   mise install
+# List tasks:                mise tasks
+# Run a task:                mise run <name>     (e.g. mise run server:check)
+#
+# Per-developer overrides go in mise.local.toml (gitignored). Secrets
+# (CONFIG_BOT_TOKEN, CONFIG_JWT_SECRET, etc.) live in server/.env, loaded
+# at runtime by dotenvy in bin/server.rs — they are intentionally NOT
+# managed by mise so they never appear in shell history or process args.
+#
+# Rust is pinned via rustup (see server/rust-toolchain.toml), not mise —
+# rust-analyzer + rustup are the source of truth for the Rust toolchain.
+
+min_version = "2024.1.0"
+
+# ── Tools ─────────────────────────────────────────────────────────────────
+[tools]
+# Frontend runtime + package manager. `latest` per project policy; pin in
+# mise.local.toml if you need reproducibility on a branch.
+bun = "latest"
+
+# SQLx CLI — used by /db-migrate and `cargo sqlx prepare --check`. Features
+# match server/Cargo.toml (postgres + rustls; no MySQL/SQLite/native-tls).
+"cargo:sqlx-cli" = { version = "0.8", default-features = false, features = "rustls,postgres" }
+
+# TOML formatter for Cargo.toml + this file.
+"cargo:taplo-cli" = "latest"
+
+# Used by .claude/hooks/stop-reminder.sh and the bot:token task.
+jq = "latest"
+
+# yq (mikefarah/yq) — handy for poking at docker-compose.yml / GH workflow YAML.
+yq = "latest"
+
+# ── Environment ───────────────────────────────────────────────────────────
+# Non-secret defaults. They mirror docker/docker-compose.yml and the
+# DATABASE_URL string allow-listed in .claude/settings.json.
+[env]
+DATABASE_URL = "postgresql://vixen:vixen_dev_password@localhost:5432/vixen"
+REDIS_URL = "redis://localhost:6379"
+RUST_LOG = "info,vixen_server=debug"
+RUST_BACKTRACE = "1"
+# Make `cargo build` work on a fresh checkout without a live DB by relying
+# on the committed .sqlx/ cache. CI should set this too.
+SQLX_OFFLINE = "true"
+
+# ── Tasks ─────────────────────────────────────────────────────────────────
+# Mirror /server-check, /website-check, /db-up, /db-migrate, /bot-token so
+# both Claude Code slash-commands and `mise run …` reach the same checks.
+
+# ── server ──
+[tasks."server:fmt"]
+dir = "{{config_root}}/server"
+description = "Format Rust code (cargo fmt)"
+run = "cargo fmt --all"
+
+[tasks."server:fmt-check"]
+dir = "{{config_root}}/server"
+description = "Verify Rust formatting (cargo fmt --check)"
+run = "cargo fmt --all -- --check"
+
+[tasks."server:clippy"]
+dir = "{{config_root}}/server"
+description = "Lint with clippy, warnings as errors"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks."server:test"]
+dir = "{{config_root}}/server"
+description = "Run server tests (cargo test)"
+run = "cargo test"
+
+[tasks."server:run"]
+dir = "{{config_root}}/server"
+description = "Run server: HTTP API + bot poller + jobs (http://localhost:8000)"
+run = "cargo run"
+
+[tasks."server:build"]
+dir = "{{config_root}}/server"
+description = "Build server in release mode"
+run = "cargo build --release"
+
+[tasks."server:sqlx-prepare"]
+dir = "{{config_root}}/server"
+description = "Refresh .sqlx/ offline query cache (requires live DB)"
+# Force offline=false so SQLx hits the live DB even though [env] sets SQLX_OFFLINE=true.
+run = "SQLX_OFFLINE=false cargo sqlx prepare -- --all-targets"
+
+[tasks."server:sqlx-check"]
+dir = "{{config_root}}/server"
+description = "Verify .sqlx/ matches the current queries (CI parity)"
+run = "cargo sqlx prepare --check -- --all-targets"
+
+[tasks."server:check"]
+description = "Server pre-commit pipeline: fmt + clippy + test + sqlx-check"
+depends = ["server:fmt-check", "server:clippy", "server:test", "server:sqlx-check"]
+
+[tasks."server:audit"]
+dir = "{{config_root}}/server"
+description = "Run cargo audit (requires `cargo install cargo-audit`)"
+run = "cargo audit"
+
+# ── website ──
+[tasks."website:install"]
+dir = "{{config_root}}/website"
+description = "Install website dependencies (bun install)"
+run = "bun install"
+
+[tasks."website:dev"]
+dir = "{{config_root}}/website"
+description = "Run Vite dev server (http://localhost:3000)"
+run = "bun run dev"
+
+[tasks."website:check"]
+dir = "{{config_root}}/website"
+description = "Biome lint + format check"
+run = "bun run check"
+
+[tasks."website:typecheck"]
+dir = "{{config_root}}/website"
+description = "TypeScript type-check (tsc --noEmit)"
+run = "bun run typecheck"
+
+[tasks."website:build"]
+dir = "{{config_root}}/website"
+description = "Production Vite build"
+run = "bun run build"
+
+[tasks."website:full-check"]
+description = "Website pre-commit pipeline: check + typecheck + build"
+depends = ["website:check", "website:typecheck", "website:build"]
+
+# ── db / docker ──
+[tasks."db:up"]
+description = "Start Postgres + Redis via docker compose"
+run = "docker compose -f docker/docker-compose.yml up -d postgres redis"
+
+[tasks."db:down"]
+description = "Stop Postgres + Redis (containers only; volumes preserved)"
+run = "docker compose -f docker/docker-compose.yml down"
+
+[tasks."db:logs"]
+description = "Tail Postgres logs"
+run = "docker compose -f docker/docker-compose.yml logs -f postgres"
+
+[tasks."db:psql"]
+description = "Open psql shell against the dev DB"
+run = "docker compose -f docker/docker-compose.yml exec postgres psql -U vixen -d vixen"
+
+[tasks."db:migrate"]
+dir = "{{config_root}}/server"
+description = "Apply SQLx migrations + refresh .sqlx/"
+run = """
+SQLX_OFFLINE=false sqlx migrate run
+SQLX_OFFLINE=false cargo sqlx prepare -- --all-targets
+"""
+
+[tasks."db:status"]
+description = "docker compose ps for the dev stack"
+run = "docker compose -f docker/docker-compose.yml ps"
+
+# ── meta ──
+[tasks.check]
+description = "Run BOTH server and website pre-commit pipelines"
+depends = ["server:check", "website:full-check"]
+
+[tasks.fmt]
+description = "Format Rust + TOML"
+run = [
+    "cargo fmt --all --manifest-path server/Cargo.toml",
+    "taplo format server/Cargo.toml mise.toml",
+]
+
+# ── bot / debug ──
+[tasks."bot:token"]
+description = "Verify the configured Telegram bot token via getMe (token never echoed)"
+# Token is read from CONFIG_BOT_TOKEN (server/.env) or TELEGRAM_BOT_TOKEN (shell).
+# We do NOT print the URL or token; only the parsed getMe result.
+run = """
+set -eu
+if [ -z "${CONFIG_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}" ] && [ -f server/.env ]; then
+    set -a
+    . server/.env
+    set +a
+fi
+TOKEN="${TELEGRAM_BOT_TOKEN:-${CONFIG_BOT_TOKEN:-}}"
+if [ -z "$TOKEN" ]; then
+    echo "Neither TELEGRAM_BOT_TOKEN nor CONFIG_BOT_TOKEN is set." >&2
+    exit 1
+fi
+curl -fsS "https://api.telegram.org/bot${TOKEN}/getMe" \\
+    | jq '.result | {username, id, can_read_all_group_messages, is_premium}'
+"""

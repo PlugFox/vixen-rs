@@ -1,0 +1,8 @@
+# Pinned via rustup (not mise) — rust-analyzer and cargo respect this file.
+# Edition 2024 needs Rust ≥ 1.85; the floor is enforced by `rust-version`
+# in server/Cargo.toml. We track `stable` here so devs get current fixes
+# without a forced toolchain swap on every checkout.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

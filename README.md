@@ -43,34 +43,38 @@ A single Rust process owns the HTTP server (Axum), the Telegram dispatcher (telo
 
 ## Quick start (local development)
 
-Requires Docker, Rust ≥ 1.85 (edition 2024), bun, and `sqlx-cli`:
+Toolchain (bun, sqlx-cli, taplo, jq, yq) is pinned via [mise](https://mise.jdx.dev); Rust is pinned via `rustup` through [server/rust-toolchain.toml](server/rust-toolchain.toml). Docker is the only host-level prerequisite.
 
 ```bash
-cargo install sqlx-cli --no-default-features --features postgres
+# 0. One-time: install all pinned tools (skips Rust — rustup picks it up).
+mise install
+
+# 1. Boot Postgres + Redis, apply migrations, refresh .sqlx/.
+mise run db:up
+mise run db:migrate
+
+# 2. Configure (only secrets and connection URLs go in env).
+cp server/config/template.env server/.env
+$EDITOR server/.env   # set CONFIG_BOT_TOKEN, CONFIG_DATABASE_URL, CONFIG_REDIS_URL
+
+# 3. Run server (HTTP + bot polling on http://localhost:8000).
+mise run server:run
+
+# 4. Run dashboard (separate terminal, http://localhost:3000).
+mise run website:install
+mise run website:dev
 ```
 
-Then:
+`mise tasks` lists every wrapper; the full set lives in [mise.toml](mise.toml). The Claude Code slash commands (`/server-check`, `/website-check`, `/db-up`, `/db-migrate`, `/bot-token`) call the underlying `cargo` / `bun` directly and work without mise installed — pick whichever entry-point fits your shell.
+
+Without mise, the equivalent setup is:
 
 ```bash
-# 1. Boot Postgres + Redis
+cargo install sqlx-cli --no-default-features --features postgres,rustls
 docker compose -f docker/docker-compose.yml up -d postgres redis
-
-# 2. Apply migrations + cache offline queries
-cd server
-sqlx migrate run
-cargo sqlx prepare --workspace
-
-# 3. Configure (only secrets and connection URLs go in env)
-cp config/template.env .env
-$EDITOR .env  # set CONFIG_BOT_TOKEN, CONFIG_DATABASE_URL, CONFIG_REDIS_URL
-
-# 4. Run server (HTTP + bot polling on http://localhost:8000)
-cargo run
-
-# 5. Run dashboard (separate terminal, http://localhost:3000)
-cd ../website
-bun install
-bun run dev
+cd server && sqlx migrate run && cargo sqlx prepare -- --all-targets
+cargo run                              # server
+cd ../website && bun install && bun run dev   # dashboard
 ```
 
 Health check: `curl localhost:8000/health` → `{ "db": "up", "redis": "up", "status": "ok" }`. OpenAPI spec: `curl localhost:8000/api/v1/openapi.json`.

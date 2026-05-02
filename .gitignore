@@ -125,6 +125,14 @@ vite.config.ts.timestamp-*
 .claude/*.lock
 
 ##############
+## MISE
+##############
+
+# Per-developer mise overrides (tool versions, env, extra tasks)
+mise.local.toml
+.mise.local.toml
+
+##############
 ## SECRETS / DEV ARTIFACTS
 ##############
 

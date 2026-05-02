@@ -2,6 +2,7 @@
 name = "vixen-server"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 description = "Telegram anti-spam bot with captcha gating, spam pipeline, daily reports and a moderator dashboard."
 repository = "https://github.com/PlugFox/vixen-rs"
