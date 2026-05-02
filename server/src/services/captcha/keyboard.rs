@@ -42,7 +42,7 @@ pub fn short_id(id: Uuid) -> String {
     let bytes = id.as_bytes();
     let mut s = String::with_capacity(8);
     for b in &bytes[..4] {
-        s.push_str(&format!("{:02x}", b));
+        s.push_str(&format!("{b:02x}"));
     }
     s
 }

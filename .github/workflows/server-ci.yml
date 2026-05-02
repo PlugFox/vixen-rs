@@ -1,13 +1,16 @@
 # Server CI — runs on PRs to master and pushes to master that touch server/**.
 #
-# Four jobs run in parallel:
-#   fmt        — cargo fmt --all -- --check
-#   clippy     — cargo clippy --all-targets --all-features -- -D warnings
-#   test       — cargo test --workspace --all-features
-#   sqlx-check — cargo sqlx prepare --check --workspace -- --all-targets
+# Five jobs run in parallel:
+#   fmt         — cargo fmt --all -- --check
+#   clippy      — cargo clippy --all-targets --all-features -- -D warnings
+#   test        — cargo test --workspace --all-features  (DB-free, default)
+#   integration — cargo test … -- --include-ignored      (postgres + redis)
+#   sqlx-check  — cargo sqlx prepare --check --workspace -- --all-targets
 #
-# Uses SQLX_OFFLINE=true so .sqlx/ cache (committed once SQL queries land) is
-# the source of truth — no live database needed for the build itself.
+# `test` runs SQLX_OFFLINE=true against the .sqlx/ cache — no live DB.
+# Integration tests (`#[ignore]`-gated, e.g. tests/captcha.rs, captcha_state.rs,
+# redis_pubsub.rs) opt-in via `--include-ignored` in the dedicated
+# `integration` job that brings up postgres + redis service containers.
 
 name: Server CI
 
@@ -49,7 +52,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
@@ -61,7 +64,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -70,19 +73,65 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   # ── Test ────────────────────────────────────────────────────
-  # Ignored integration tests (e.g. tests/redis_pubsub.rs) are skipped here.
-  # They opt-in via `--ignored` and need a running redis/postgres.
+  # Default `cargo test` — DB-free unit + non-ignored integration tests.
+  # `#[ignore]`-gated tests (postgres / redis backed) run in `integration`.
   test:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
       - run: cargo test --workspace --all-features
+
+  # ── Integration ─────────────────────────────────────────────
+  # Runs `#[ignore]`-gated tests that need real services:
+  #   tests/captcha.rs        — #[sqlx::test] needs DATABASE_URL + postgres
+  #   tests/captcha_state.rs  — needs CONFIG_REDIS_URL + redis
+  #   tests/redis_pubsub.rs   — needs redis://localhost:6379
+  #
+  # SQLX_OFFLINE stays on so the build still uses .sqlx/; the live DB is only
+  # consumed at test runtime by `#[sqlx::test]`'s per-test database setup.
+  integration:
+    name: Integration (postgres + redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vixen
+          POSTGRES_PASSWORD: vixen_dev_password
+          POSTGRES_DB: vixen
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vixen -d vixen"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://vixen:vixen_dev_password@localhost:5432/vixen
+      CONFIG_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: cargo test --workspace --all-features -- --include-ignored
 
   # ── SQLx prepare --check ────────────────────────────────────
   # Verifies the .sqlx/ offline cache matches the current sqlx::query! macros.
@@ -95,7 +144,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server

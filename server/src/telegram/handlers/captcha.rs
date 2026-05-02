@@ -349,15 +349,15 @@ mod tests {
     fn caption_renders_progress_mask() {
         assert_eq!(
             caption_for(""),
-            format!("Solve the captcha: {0}{0}{0}{0}", MASK_EMPTY)
+            format!("Solve the captcha: {MASK_EMPTY}{MASK_EMPTY}{MASK_EMPTY}{MASK_EMPTY}")
         );
         assert_eq!(
             caption_for("12"),
-            format!("Solve the captcha: {0}{0}{1}{1}", MASK_FILLED, MASK_EMPTY)
+            format!("Solve the captcha: {MASK_FILLED}{MASK_FILLED}{MASK_EMPTY}{MASK_EMPTY}")
         );
         assert_eq!(
             caption_for("1234"),
-            format!("Solve the captcha: {0}{0}{0}{0}", MASK_FILLED)
+            format!("Solve the captcha: {MASK_FILLED}{MASK_FILLED}{MASK_FILLED}{MASK_FILLED}")
         );
     }
 }

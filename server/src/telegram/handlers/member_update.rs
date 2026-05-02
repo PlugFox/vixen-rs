@@ -137,7 +137,7 @@ fn is_present_in_chat(kind: &ChatMemberKind) -> bool {
 
 fn mention(user: &teloxide::types::User) -> String {
     if let Some(username) = &user.username {
-        format!("@{}", username)
+        format!("@{username}")
     } else {
         user.full_name()
     }

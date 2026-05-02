@@ -87,8 +87,8 @@ async fn verify(bot: Bot, msg: Message, state: AppState, arg: &str) -> Result<()
     }
 
     let reply = match outcome {
-        Outcome::Solved => format!("Verified user {}.", target_user_id),
-        Outcome::AlreadyVerified => format!("User {} was already verified.", target_user_id),
+        Outcome::Solved => format!("Verified user {target_user_id}."),
+        Outcome::AlreadyVerified => format!("User {target_user_id} was already verified."),
         _ => "Unexpected verify state.".to_string(),
     };
     let _ = bot.send_message(msg.chat.id, reply).await;

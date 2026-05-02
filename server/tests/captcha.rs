@@ -4,6 +4,12 @@
 //! tests are isolated and can run concurrently. There is no Telegram I/O
 //! here — the service is Telegram-free; the bot calls live in handlers and
 //! the expiry job, which we cover with manual end-to-end testing.
+//!
+//! Marked `#[ignore]` so default `cargo test` does not require a running
+//! Postgres. Opt-in via
+//! `DATABASE_URL=postgres://… cargo test --test captcha -- --ignored`
+//! (or `--include-ignored` for the full server suite). CI runs them in a
+//! dedicated `integration` job that brings up postgres + redis services.
 
 use sqlx::PgPool;
 use vixen_server::services::captcha::{CaptchaService, Fonts, Outcome, solution_for};
@@ -32,6 +38,7 @@ async fn seed_chat(pool: &PgPool, chat_id: i64) {
 // ── issue ─────────────────────────────────────────────────────────────────
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn issue_writes_row_and_returns_image(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -60,6 +67,7 @@ async fn issue_writes_row_and_returns_image(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn issue_is_idempotent_per_user(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -84,6 +92,7 @@ async fn issue_is_idempotent_per_user(pool: PgPool) {
 // ── solve ─────────────────────────────────────────────────────────────────
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn solve_correct_marks_verified(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -119,6 +128,7 @@ async fn solve_correct_marks_verified(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn solve_wrong_decrements_attempts(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -142,6 +152,7 @@ async fn solve_wrong_decrements_attempts(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn solve_final_wrong_kicks(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -179,6 +190,7 @@ async fn solve_final_wrong_kicks(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn solve_expired_returns_expired(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -198,6 +210,7 @@ async fn solve_expired_returns_expired(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn solve_no_row_returns_not_found(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -208,6 +221,7 @@ async fn solve_no_row_returns_not_found(pool: PgPool) {
 // ── concurrency ───────────────────────────────────────────────────────────
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn concurrent_solve_picks_one_winner(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
@@ -243,6 +257,7 @@ async fn concurrent_solve_picks_one_winner(pool: PgPool) {
 // ── verify_manual ─────────────────────────────────────────────────────────
 
 #[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
 async fn verify_manual_writes_ledger(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
