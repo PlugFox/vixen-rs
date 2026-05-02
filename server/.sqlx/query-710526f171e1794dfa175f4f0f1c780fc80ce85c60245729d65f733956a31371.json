@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT captcha_lifetime_secs FROM chat_config WHERE chat_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "captcha_lifetime_secs",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "710526f171e1794dfa175f4f0f1c780fc80ce85c60245729d65f733956a31371"
+}

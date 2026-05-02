@@ -130,6 +130,16 @@ Not enforced in CI. Treat as informational. Aim for unit coverage of pure logic 
 - `cargo test -- --nocapture` — show `println!` / `dbg!` output.
 - `cargo test -- --test-threads=1` — serialize if you suspect a flake; fix the flake, don't make this default.
 
+## Reacting to a failing test
+
+A red test is, by default, a real defect in the code under test — **not** an outdated test that needs to be "brought in line" with the current implementation.
+
+1. Reproduce the failure locally, read the actual assertion, understand what behavior is being checked.
+2. Decide which side is wrong. Default assumption: the code is wrong. Declaring the test wrong requires a concrete reason (the requirement changed, the fixture was always invalid, the assertion measures something untestable).
+3. Code wrong → fix the code, keep the assertion. Test genuinely wrong → fix the test AND record in the commit message why the old assertion no longer holds.
+4. **Forbidden**: weakening an assertion, removing a case, widening a tolerance, mocking out the failing path, commenting out a check, or marking the test `#[ignore]` to make CI green. If a test truly must be paused, open a tracking issue, link it from the `#[ignore]` attribute, and treat it as a bug — not a fix.
+5. Same rule for `cargo clippy` / `cargo check` failures — fix the cause; do not paper over with `#[allow(...)]`, `unwrap()`, or type casts.
+
 ## Common mistakes
 
 - Tests that pass locally and fail in CI — usually wall-clock assumptions (use `pause()`) or ordering assumptions (sort before comparing).

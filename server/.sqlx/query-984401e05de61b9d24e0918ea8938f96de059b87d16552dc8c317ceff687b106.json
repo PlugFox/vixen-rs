@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO moderation_actions\n                    (chat_id, target_user_id, action, actor_kind, message_id, reason)\n                VALUES ($1, $2, 'captcha_expired', 'bot', $3, 'lifetime')\n                ON CONFLICT DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "984401e05de61b9d24e0918ea8938f96de059b87d16552dc8c317ceff687b106"
+}

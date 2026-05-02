@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, solution, attempts_left FROM captcha_challenges WHERE chat_id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "solution",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "attempts_left",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "80fa1fc922175b46b9f88bb0c3ed51bd069dce2df820141bd1c258258f5a4663"
+}

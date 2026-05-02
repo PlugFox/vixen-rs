@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE captcha_challenges\n                SET attempts_left = $3\n                WHERE chat_id = $1 AND user_id = $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d603f4a1c9ae8d7e59d8769e948bfd56f56ad8a78bdd696c80891a7c41c5406"
+}

@@ -1,0 +1,173 @@
+{
+  // ── Editor ────────────────────────────────────────────────────
+  "editor.rulers": [120],
+  "editor.formatOnSave": true,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.inlayHints.enabled": "onUnlessPressed",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.trimFinalNewlines": true,
+
+  // ── Files / search ────────────────────────────────────────────
+  "files.associations": {
+    "*.tsx": "typescriptreact",
+    "*.ts": "typescript",
+    "Cargo.toml": "toml",
+    "*.env*": "dotenv"
+  },
+  "files.watcherExclude": {
+    "**/target/**": true,
+    "**/node_modules/**": true,
+    "**/.sqlx/**": false,
+    "**/dist/**": true
+  },
+  "files.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/dist": true
+  },
+  "search.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.sqlx": true,
+    "**/Cargo.lock": true,
+    "**/bun.lockb": true,
+    "**/.vite": true
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "Cargo.toml": "Cargo.lock, rust-toolchain*, clippy.toml, rustfmt.toml, taplo.toml",
+    "package.json": "bun.lockb, bun.lock, package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc, biome.json, biome.jsonc, vite.config.*, tsconfig*.json",
+    "docker-compose.yml": "docker-compose.*.yml, .env, .env.*, .dockerignore",
+    ".env": ".env.*",
+    "README.md": "LICENSE, CHANGELOG.md, CONTRIBUTING.md, AGENTS.md, CODE_OF_CONDUCT.md, TODO.md",
+    "CLAUDE.md": "AGENTS.md"
+  },
+
+  // ── Terminal ──────────────────────────────────────────────────
+  "terminal.integrated.defaultProfile.osx": "zsh",
+  "terminal.integrated.cwd": "${workspaceFolder}",
+
+  // ── Rust / rust-analyzer ──────────────────────────────────────
+  "rust-analyzer.linkedProjects": ["${workspaceFolder}/server/Cargo.toml"],
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.allTargets": true,
+  "rust-analyzer.check.extraArgs": ["--", "-D", "warnings"],
+  "rust-analyzer.check.extraEnv": { "SQLX_OFFLINE": "true" },
+  "rust-analyzer.cargo.extraEnv": { "SQLX_OFFLINE": "true" },
+  "rust-analyzer.runnables.extraEnv": { "RUST_BACKTRACE": "1" },
+  "rust-analyzer.imports.granularity.group": "module",
+  "rust-analyzer.imports.prefix": "crate",
+  "rust-analyzer.inlayHints.parameterHints.enable": true,
+  "rust-analyzer.inlayHints.typeHints.enable": true,
+  "rust-analyzer.inlayHints.chainingHints.enable": true,
+  "rust-analyzer.lens.enable": true,
+  "rust-analyzer.lens.run.enable": true,
+  "rust-analyzer.lens.debug.enable": true,
+  "rust-analyzer.procMacro.enable": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 4
+  },
+
+  // ── TOML (taplo) ──────────────────────────────────────────────
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml",
+    "editor.formatOnSave": true
+  },
+  "evenBetterToml.formatter.alignEntries": false,
+  "evenBetterToml.formatter.reorderKeys": false,
+
+  // ── TypeScript / JavaScript ───────────────────────────────────
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "typescript.suggest.autoImports": true,
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "typescript.tsdk": "website/node_modules/typescript/lib",
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "quickfix.biome": "explicit",
+      "source.organizeImports.biome": "explicit"
+    }
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "quickfix.biome": "explicit",
+      "source.organizeImports.biome": "explicit"
+    }
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.formatOnSave": true
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+
+  // ── SolidJS / Tailwind ────────────────────────────────────────
+  "emmet.includeLanguages": { "typescriptreact": "html" },
+  "tailwindCSS.includeLanguages": { "typescriptreact": "html" },
+  "tailwindCSS.experimental.classRegex": [
+    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["cx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"],
+    ["clsx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"]
+  ],
+
+  // ── Markdown ──────────────────────────────────────────────────
+  "[markdown]": {
+    "editor.formatOnSave": false,
+    "editor.wordWrap": "on"
+  },
+
+  // ── Git ───────────────────────────────────────────────────────
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "git.openRepositoryInParentFolders": "never",
+
+  // ── Docker ────────────────────────────────────────────────────
+  "docker.composeCommand": "docker compose",
+
+  // ── Workbench ─────────────────────────────────────────────────
+  "workbench.colorCustomizations": {
+    "activityBar.activeBorder": "#ff6b35",
+    "activityBar.activeBackground": "#ff6b3520",
+    "statusBar.background": "#7c3aed",
+    "statusBar.foreground": "#ffffff"
+  },
+
+  // ── Spell-check (cspell, optional) ────────────────────────────
+  "cSpell.words": [
+    "axum",
+    "biomejs",
+    "deadpool",
+    "dotenvy",
+    "Kobalte",
+    "moka",
+    "PGDATA",
+    "Plugfox",
+    "psql",
+    "rustls",
+    "rustsec",
+    "Scalar",
+    "sqlx",
+    "supergroup",
+    "supergroups",
+    "taplo",
+    "teloxide",
+    "tsdk",
+    "utoipa",
+    "vixen",
+    "webp",
+    "xxhash"
+  ]
+}

@@ -13,3 +13,10 @@ records: date, file path, sha256, source, license, purpose.
                      bundled in dejavu-fonts-ttf-2.37/LICENSE inside the upstream archive)
             purpose  Digit-pad renderer for the M1 captcha pipeline (`image` + `ab_glyph`).
                      Loaded as `&[u8]` via `include_bytes!` per server/docs/captcha.md.
+
+────────────────────────────────────────────────────────────────────────────
+2026-05-02  visual style v1: gradient backgrounds (3 palettes), per-digit
+            rotation ±15°, scale jitter 108..132 px, quadratic-Bezier curve
+            noise, faint dot field. 480×180 lossless WebP. Implemented in
+            server/src/services/captcha/render.rs. Palette selection and all
+            jitter is seeded from xxh3(challenge_id) for determinism.

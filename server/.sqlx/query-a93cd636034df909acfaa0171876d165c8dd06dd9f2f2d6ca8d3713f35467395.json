@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chat_config (chat_id) VALUES ($1) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a93cd636034df909acfaa0171876d165c8dd06dd9f2f2d6ca8d3713f35467395"
+}

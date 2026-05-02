@@ -83,6 +83,12 @@ Verification is per-chat. Hot-path query: primary-key lookup.
 | | | `UNIQUE (chat_id, user_id)` — one outstanding challenge per `(chat,user)` |
 | | | Index: `(expires_at)` for the expiry sweep |
 
+The captcha **in-progress digit input** (the partial string typed between
+button presses) and the **per-message callback meta** (owner_user_id +
+uuid_short for the ownership check) are NOT stored here — they live in
+Redis under `cap:input:{chat}:{user}` and `cap:meta:{chat}:{message}`,
+TTL = challenge lifetime. See [captcha.md § State storage](captcha.md#state-storage).
+
 ### `spam_messages`
 
 xxh3-64 hash → known spam signature.
@@ -105,7 +111,7 @@ Audit log. Append-only.
 | `id` | `UUID PRIMARY KEY DEFAULT uuid_generate_v4()` | |
 | `chat_id` | `BIGINT NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE` | |
 | `target_user_id` | `BIGINT NOT NULL` | |
-| `action` | `TEXT NOT NULL CHECK (action IN ('ban','unban','mute','unmute','delete','verify','unverify'))` | |
+| `action` | `TEXT NOT NULL CHECK (action IN ('ban','unban','mute','unmute','delete','verify','unverify','captcha_expired','captcha_failed','kick'))` | M1 added the last three for captcha-pipeline outcomes |
 | `actor_kind` | `TEXT NOT NULL CHECK (actor_kind IN ('bot','moderator'))` | |
 | `actor_user_id` | `BIGINT` | NULL when `actor_kind='bot'` |
 | `message_id` | `BIGINT` | Telegram message_id; NULL when not message-scoped |

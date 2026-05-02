@@ -1,0 +1,111 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    /* ───── Server (Rust / lldb via CodeLLDB) ───── */
+    {
+      "name": "server: debug",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path=${workspaceFolder}/server/Cargo.toml",
+          "--bin=server",
+          "--package=vixen-server"
+        ],
+        "filter": { "name": "server", "kind": "bin" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/server",
+      "envFile": "${workspaceFolder}/server/.env",
+      "env": {
+        "RUST_BACKTRACE": "1",
+        "RUST_LOG": "info,vixen=debug,sqlx=warn,teloxide=info"
+      },
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "docker:up"
+    },
+    {
+      "name": "server: debug (release)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--release",
+          "--manifest-path=${workspaceFolder}/server/Cargo.toml",
+          "--bin=server",
+          "--package=vixen-server"
+        ],
+        "filter": { "name": "server", "kind": "bin" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/server",
+      "envFile": "${workspaceFolder}/server/.env",
+      "env": { "RUST_BACKTRACE": "1" },
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "server: debug current test",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--manifest-path=${workspaceFolder}/server/Cargo.toml",
+          "--package=vixen-server"
+        ],
+        "filter": { "kind": "test" }
+      },
+      "args": ["${selectedText}"],
+      "cwd": "${workspaceFolder}/server",
+      "env": { "RUST_BACKTRACE": "1" },
+      "sourceLanguages": ["rust"]
+    },
+
+    /* ───── Website (bun + Vite) ───── */
+    {
+      "name": "website: dev (bun)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/website",
+      "envFile": "${workspaceFolder}/website/.env",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"],
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://[^/\\s]+)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      }
+    },
+
+    /* ───── Website (browser-side debugging via Chrome) ───── */
+    {
+      "name": "website: chrome (attach to dev)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/website",
+      "userDataDir": "${workspaceFolder}/.vscode/chrome-debug",
+      "sourceMaps": true,
+      "preLaunchTask": "website:dev"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: Docker + Server + Website",
+      "configurations": ["server: debug", "website: dev (bun)"],
+      "preLaunchTask": "dev:up",
+      "presentation": {
+        "hidden": false,
+        "group": "full-stack",
+        "order": 1
+      },
+      "stopAll": true
+    }
+  ]
+}

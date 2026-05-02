@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM captcha_challenges WHERE chat_id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c0958c14445b0a582e2d053a50ae629dfba54d2c861aa92e71ab275cf13ccf5"
+}

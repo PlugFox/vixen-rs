@@ -37,11 +37,11 @@ This is the **single source of truth** for "is this chat ours". Don't re-check i
 | Update | Handler | Purpose |
 |---|---|---|
 | `Message` (command) | `handle_command` | Slash-command dispatch — see table below. |
-| `Message` (text/media) | `handle_message` | Spam pipeline. Verified users bypass; unverified trigger captcha if not already gated. |
+| `Message` (text/media) | `message_gate::handle` (then M2 spam pipeline) | Verified or admin → bypass. Unverified non-admin → delete the message; if no live captcha row, issue + post a fresh photo. **No restrict, no kick.** |
 | `EditedMessage` | `handle_edited_message` | Re-run spam pipeline against the new content; log differential. |
-| `ChatMemberUpdated` | `handle_chat_member_update` | New member → restrict + issue captcha. Departing member → no-op. |
+| `ChatMemberUpdated` | `member_update::handle` | New non-admin joiner → issue captcha (no restrict). Owner/admin transitions and departures → no-op. |
 | `MyChatMember` | `handle_my_chat_member` | Bot added to a chat (warn if not in `CONFIG_CHATS`) / removed from a chat (log). |
-| `CallbackQuery` (`vc:*` data) | `handle_captcha_callback` | User input on captcha digit-pad. Always answers within 30s. |
+| `CallbackQuery` (`vc:*` data) | `captcha::handle` | User input on captcha digit-pad. Always answers within 30s; ownership-checked against the per-message Redis meta row. |
 
 ## Slash commands
 
@@ -61,9 +61,9 @@ When you add a slash command, you MUST register it both in `Command` (in `src/te
 
 ## Captcha callback data
 
-CallbackQuery `data` field carries the digit input encoded as `vc:<challenge_short>:<digit_or_action>`. Actions: `0`–`9`, `b` (backspace), `r` (refresh).
+CallbackQuery `data` field carries the digit input encoded as `vc:<challenge_short>:<op>` where `<challenge_short>` is the first 8 hex characters of the challenge UUID. Ops: `0`–`9`, `bs` (backspace), `rf` (refresh).
 
-Handler decodes, applies to `captcha_challenges.attempts_left` / current input buffer (in-memory, derived from message caption since callbacks are stateless), updates the message caption with the current input length as emoji boxes, and on full input either solves or fails.
+Handler decodes, applies to `captcha_challenges.attempts_left` and the per-press digit buffer in Redis (`cap:input:{chat_id}:{user_id}`, TTL = challenge lifetime), updates the message caption with a length-only mask (`●●○○`) so the actual digits never leak through Telegram's update API, and on full input either solves or fails. Ownership is enforced via the per-message Redis meta key (`cap:meta:{chat_id}:{message_id}`): a callback whose presser does not match `meta.owner_user_id` gets a "this isn't your captcha" toast and the captcha is not touched.
 
 ## Polling vs webhook
 

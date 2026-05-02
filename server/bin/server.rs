@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::Parser;
 use teloxide::prelude::*;
+use teloxide::utils::command::BotCommands;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -16,7 +17,10 @@ use vixen_server::{
     api::{AppState, build_router},
     build_info,
     config::Config,
-    database::{Database, Redis},
+    database::{Database, Redis, ensure_watched_chats},
+    jobs,
+    services::captcha::{CaptchaService, CaptchaState, Fonts},
+    telegram::commands::Command,
     telegram::{WatchedChats, build_dispatcher},
     telemetry,
 };
@@ -68,31 +72,62 @@ async fn main() -> anyhow::Result<()> {
     );
     info!("redis connected");
 
+    // Idempotent: every CONFIG_CHATS entry must have a row in `chats` and
+    // `chat_config` so subsequent INSERTs (captcha challenges, moderation
+    // actions, etc.) don't trip foreign-key constraints.
+    ensure_watched_chats(db.pool(), &config.chats)
+        .await
+        .context("seed watched chats")?;
+
     // Hot-reload subscription: M4 publishes `chat_config:{chat_id}` invalidations
     // here when a moderator edits per-chat settings. For now we just log them.
     let pubsub_handle = redis.subscribe("chat_config:*", cancel.clone(), |channel, payload| {
         debug!(channel, payload, "chat_config invalidation received");
     });
 
+    let fonts = Fonts::load().context("load captcha fonts")?;
+    let captcha = Arc::new(CaptchaService::new(db.pool().clone(), fonts));
+    let captcha_state = Arc::new(CaptchaState::new(redis.clone()));
+
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
         redis: redis.clone(),
+        captcha: captcha.clone(),
+        captcha_state: captcha_state.clone(),
     };
 
-    let http_handle = spawn_http(&config.address, state, cancel.clone())
+    let http_handle = spawn_http(&config.address, state.clone(), cancel.clone())
         .await
         .context("HTTP server failed to start")?;
 
-    let dispatcher_handle = spawn_dispatcher(&config, cancel.clone());
+    let bot = Bot::new(config.bot_token.expose());
 
-    // Future tasks land here under the same `cancel`:
-    //   - background-job runner (M1+)
+    if let Err(e) = bot.set_my_commands(Command::bot_commands()).await {
+        warn!(error = %e, "set_my_commands failed");
+    }
 
+    let dispatcher_handle = spawn_dispatcher(bot.clone(), &config, state.clone(), cancel.clone());
+    let job_handles = jobs::spawn_all(bot.clone(), state.clone(), cancel.clone());
+
+    // Surface JoinErrors (panics, abort) from each long-running task. Without
+    // this, a job panic during shutdown is swallowed and the operator sees
+    // only a "shutdown clean" log line.
     let join = async {
-        let _ = http_handle.await;
-        let _ = dispatcher_handle.await;
-        let _ = pubsub_handle.await;
+        if let Err(e) = http_handle.await {
+            error!(?e, "HTTP server task join error");
+        }
+        if let Err(e) = dispatcher_handle.await {
+            error!(?e, "telegram dispatcher task join error");
+        }
+        for (idx, handle) in job_handles.into_iter().enumerate() {
+            if let Err(e) = handle.await {
+                error!(job_index = idx, ?e, "background job task join error");
+            }
+        }
+        if let Err(e) = pubsub_handle.await {
+            error!(?e, "redis pubsub task join error");
+        }
     };
 
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, join).await {
@@ -132,15 +167,19 @@ async fn spawn_http(
     Ok(handle)
 }
 
-fn spawn_dispatcher(config: &Config, cancel: CancellationToken) -> JoinHandle<()> {
-    let bot = Bot::new(config.bot_token.expose());
+fn spawn_dispatcher(
+    bot: Bot,
+    config: &Config,
+    state: AppState,
+    cancel: CancellationToken,
+) -> JoinHandle<()> {
     let watched = WatchedChats::new(config.chats.iter().copied());
     info!(
         chats = watched.len(),
         "telegram dispatcher: starting polling"
     );
 
-    let mut dispatcher = build_dispatcher(bot, watched);
+    let mut dispatcher = build_dispatcher(bot, watched, state);
     let shutdown = dispatcher.shutdown_token();
 
     // Bridge our CancellationToken to teloxide's ShutdownToken: when the global

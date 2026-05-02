@@ -1,0 +1,8 @@
+# Pinned via rustup (not mise) — rust-analyzer and cargo respect this file.
+# Edition 2024 needs Rust ≥ 1.85; pinned to 1.88 because newer transitive
+# deps (image 0.25, time 0.3, icu_* 2.2) require ≥ 1.88. Bump in lockstep
+# with CI (`.github/workflows/server-ci.yml` → `dtolnay/rust-toolchain@…`).
+[toolchain]
+channel = "1.88"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

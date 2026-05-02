@@ -111,4 +111,12 @@ Then run the validation pipeline:
 
 If tests or build fail, fix the issue before reporting completion.
 
+**Never silence a failing test, lint, or type error to make it pass.** A red signal is, by default, evidence that the production code is broken — not that the check needs to be loosened. Before touching the test/check:
+
+1. Reproduce the failure and read what it actually asserts.
+2. Decide which side is wrong: the code under test, or the test (stale assertion, wrong fixture, flaky timing). The burden of proof is on declaring the test wrong, and that proof must be specific (which assertion, why it no longer reflects desired behavior).
+3. If the code is wrong → fix the code. If the test is genuinely wrong (outdated, badly written, asserts behavior that was deliberately changed) → fix the test AND state in the commit message why the old assertion no longer holds.
+4. Never weaken an assertion, delete a case, loosen a tolerance, comment out a check, or slap `#[ignore]` / `it.skip` / `xit` on a test just to get CI green. If a test must be temporarily disabled, open a tracking issue, link it from the test, and treat it as a bug.
+5. Same rule for lints and types — fix the underlying problem; do not cast to `any`, add `#[allow(...)]` / `// biome-ignore` / `// @ts-ignore` to make the diagnostic disappear.
+
 The "Before / After Writing Code" guidance above incorporates formulations from [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills). Available project skills are indexed in [.claude/skills/README.md](.claude/skills/README.md).
