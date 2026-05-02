@@ -38,7 +38,7 @@
   },
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.patterns": {
-    "Cargo.toml": "Cargo.lock, rust-toolchain*, .cargo/**, clippy.toml, rustfmt.toml, taplo.toml",
+    "Cargo.toml": "Cargo.lock, rust-toolchain*, clippy.toml, rustfmt.toml, taplo.toml",
     "package.json": "bun.lockb, bun.lock, package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc, biome.json, biome.jsonc, vite.config.*, tsconfig*.json",
     "docker-compose.yml": "docker-compose.*.yml, .env, .env.*, .dockerignore",
     ".env": ".env.*",
