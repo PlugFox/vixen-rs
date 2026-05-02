@@ -1,0 +1,31 @@
+# N-gram phrase corpus. With the default chat_config (spam_threshold = 1.0,
+# every phrase weight = 1.0), a single phrase match triggers Verdict::Delete.
+#
+# Each entry must be ≥ 48 normalized chars (the pipeline's MIN_NORMALIZED_LEN);
+# shorter strings are Allowed regardless of phrase content. We pad with
+# realistic chat-style framing rather than gibberish so the negatives remain
+# representative.
+
+must_delete:
+  - "Привет всем, предлагаю быстрый заработок без вложений в нашей команде"
+  - "Hi everyone, click here for the best price you'll find anywhere today"
+  - "уважаемый пользователь, выгодное предложение только сегодня для вас"
+  - "buy now and save big — limited time act now while supplies last"
+  - "пишите в лс если хотите узнать про дополнительный доход и инвестиции"
+  - "free offer for new subscribers, no obligation, click here to claim"
+  - "квартира в рассрочку без первоначального взноса — детали в лс"
+  - "заработок в интернете на дому, гарантированный доход от тысячи в день"
+  - "криптовалюта и биткоин майнинг — присоединяйся к команде сейчас"
+  - "курсы похудения и марафон похудения — стопроцентный результат гарантия"
+
+must_allow:
+  - "Привет всем! Вчера обсуждали PR #143, там кажется конфликт миграций"
+  - "I pushed the fix for the captcha race condition, should we deploy tonight"
+  - "Сегодня встреча перенесена на 18:00, кому удобно подключиться по zoom"
+  - "Анна, ты видела мой отзыв в Slack про новую структуру роутов?"
+  - "Запушил миграцию для chat_config, подскажите если что-то сломал в проде"
+  - "Has anyone tried the new tokio-util cancel token pattern in jobs/?"
+  - "В пятницу созвон в 18:00, обсудим долгосрочную дорожную карту M3-M5"
+  - "Code review готов, оставил несколько комментов про обработку ошибок"
+  - "Looks good to me, but maybe rename the helper to `is_authorized` instead"
+  - "Кто-нибудь знает почему integration тесты иногда флакают на CI?"

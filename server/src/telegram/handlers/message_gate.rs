@@ -1,23 +1,27 @@
-//! Message gate — for **non-command** messages from unverified non-admin users.
+//! Message gate — for **non-command** messages.
 //!
-//! M1 captcha policy: we never restrict or kick. Instead, every message from
-//! a user who hasn't passed captcha is silently deleted, and a fresh captcha
-//! is issued (or the existing one re-anchored) so the user has another shot.
+//! Two paths share this endpoint:
 //!
-//! Order of checks is fastest-first to keep the hot path cheap:
+//! - **Verified users** → run the M2 spam pipeline (`spam.inspect()`) and
+//!   dispatch any non-`Allow` verdict through `moderation.apply()`.
+//! - **Unverified non-admin users** → delete + issue captcha (M1 policy:
+//!   never restrict or kick; the user always gets another shot).
 //!
-//! 1. `verified_users` — Redis cache, then PG. Most messages in a healthy
-//!    chat hit this and short-circuit.
+//! Order of checks is fastest-first:
+//!
+//! 1. `verified_users` — Redis cache, then PG. Most healthy-chat messages
+//!    hit this; on hit we run the spam pipeline and return.
 //! 2. Chat admins — Redis cache, fallback to `get_chat_administrators` on
-//!    miss with 6h TTL.
+//!    miss with 6h TTL. Admins skip the spam pipeline (they wouldn't post
+//!    spam, and the bot can't ban them anyway).
 //! 3. Otherwise: delete the message; if no live challenge → issue + send;
 //!    if a live challenge already exists → just delete (don't spam the chat
 //!    with multiple captcha photos for one user).
 //!
 //! Slash-command messages don't reach this endpoint — they're routed by the
 //! `filter_command::<Command>` branch upstream so unverified users can still
-//! call `/help` or `/status`. `/verify` is gated by an admin check inside
-//! its own handler.
+//! call `/help` or `/status`. `/verify`, `/ban`, `/unban` are gated by their
+//! own permission checks.
 
 use anyhow::Result;
 use teloxide::prelude::*;
@@ -25,7 +29,10 @@ use teloxide::types::{ChatId, ChatMemberKind, InputFile};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
+use crate::models::moderation_action::ActorKind;
 use crate::services::captcha::short_id;
+use crate::services::moderation_service::{Action, ApplyContext};
+use crate::services::spam::service::Verdict;
 
 #[instrument(
     skip(bot, msg, state),
@@ -41,6 +48,7 @@ pub async fn handle(bot: Bot, msg: Message, state: AppState) -> Result<()> {
     let uid = user_id.0 as i64;
 
     if is_verified(&state, chat_id.0, uid).await {
+        run_spam_pipeline(&state, &msg, chat_id.0, uid).await;
         return Ok(());
     }
     if is_chat_admin(&bot, &state, chat_id.0, uid).await {
@@ -189,5 +197,60 @@ fn mention(user: &teloxide::types::User) -> String {
         format!("@{username}")
     } else {
         user.full_name()
+    }
+}
+
+/// Run the M2 spam pipeline for a verified, non-admin user. Verdicts other
+/// than `Allow` are dispatched through `ModerationService::apply` so the
+/// ledger row and the bot side-effect stay paired.
+///
+/// Errors are swallowed at warn level — spam-detection failure must not
+/// block the conversation. The captcha gate (above) is the hard guarantee;
+/// the spam pipeline is best-effort defense in depth.
+async fn run_spam_pipeline(state: &AppState, msg: &Message, chat_id: i64, user_id: i64) {
+    let verdict = match state.spam.inspect(msg).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = ?e, "spam.inspect failed");
+            return;
+        }
+    };
+
+    let (action, ctx) = match verdict {
+        Verdict::Allow => return,
+        Verdict::Delete { reason_json } => (
+            Action::Delete {
+                reason: reason_json.to_string(),
+            },
+            ApplyContext {
+                chat_id,
+                target_user_id: user_id,
+                message_id: Some(msg.id.0),
+                actor_kind: ActorKind::Bot,
+                actor_user_id: None,
+            },
+        ),
+        Verdict::Ban { reason_json, until } => (
+            Action::Ban {
+                reason: reason_json.to_string(),
+                until,
+            },
+            ApplyContext {
+                chat_id,
+                target_user_id: user_id,
+                // Ledger keys the row to the message that triggered the
+                // ban — useful for replay/audit and gives the unique
+                // constraint a non-NULL value.
+                message_id: Some(msg.id.0),
+                actor_kind: ActorKind::Bot,
+                actor_user_id: None,
+            },
+        ),
+    };
+
+    if let Err(e) = state.moderation.apply(action, ctx).await {
+        warn!(error = ?e, "moderation.apply failed (spam pipeline)");
+    } else {
+        info!(chat_id, user_id, "spam verdict applied");
     }
 }

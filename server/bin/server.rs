@@ -20,6 +20,9 @@ use vixen_server::{
     database::{Database, Redis, ensure_watched_chats},
     jobs,
     services::captcha::{CaptchaService, CaptchaState, Fonts},
+    services::cas_client::CasClient,
+    services::moderation_service::ModerationService,
+    services::spam::service::SpamService,
     telegram::commands::Command,
     telegram::{WatchedChats, build_dispatcher},
     telemetry,
@@ -89,19 +92,27 @@ async fn main() -> anyhow::Result<()> {
     let captcha = Arc::new(CaptchaService::new(db.pool().clone(), fonts));
     let captcha_state = Arc::new(CaptchaState::new(redis.clone()));
 
+    // Bot is constructed before AppState so M2 services (ModerationService)
+    // can capture a clone — Bot is cheap to clone.
+    let bot = Bot::new(config.bot_token.expose());
+
+    let cas = CasClient::new(redis.clone(), config.cas_base_url.clone());
+    let spam = Arc::new(SpamService::new(db.pool().clone(), cas));
+    let moderation = ModerationService::new(db.pool().clone(), bot.clone());
+
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
         redis: redis.clone(),
         captcha: captcha.clone(),
         captcha_state: captcha_state.clone(),
+        spam: spam.clone(),
+        moderation: moderation.clone(),
     };
 
     let http_handle = spawn_http(&config.address, state.clone(), cancel.clone())
         .await
         .context("HTTP server failed to start")?;
-
-    let bot = Bot::new(config.bot_token.expose());
 
     if let Err(e) = bot.set_my_commands(Command::bot_commands()).await {
         warn!(error = %e, "set_my_commands failed");

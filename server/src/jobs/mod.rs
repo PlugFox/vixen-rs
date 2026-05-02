@@ -2,6 +2,7 @@
 //! summary generation). See `server/docs/rules/background-jobs.md`.
 
 pub mod captcha_expiry;
+pub mod spam_cleanup;
 
 use teloxide::prelude::*;
 use tokio::task::JoinHandle;
@@ -16,10 +17,13 @@ use crate::api::AppState;
 /// surface as a `JoinError` when the caller awaits the returned handle, which
 /// is where panic logging happens (see `bin/server.rs`).
 pub fn spawn_all(bot: Bot, state: AppState, shutdown: CancellationToken) -> Vec<JoinHandle<()>> {
-    vec![spawn_named(
-        captcha_expiry::NAME,
-        captcha_expiry::run(bot, state, shutdown),
-    )]
+    vec![
+        spawn_named(
+            captcha_expiry::NAME,
+            captcha_expiry::run(bot.clone(), state.clone(), shutdown.clone()),
+        ),
+        spawn_named(spam_cleanup::NAME, spam_cleanup::run(bot, state, shutdown)),
+    ]
 }
 
 fn spawn_named<F>(name: &'static str, fut: F) -> JoinHandle<()>

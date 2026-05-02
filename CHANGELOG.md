@@ -13,6 +13,85 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Added
 
+- M2 spam pipeline. `services::spam::SpamService::inspect(message)` runs the
+  cascade documented in `server/docs/spam-detection.md`: NFKC + lowercase +
+  zero-width / combining-mark strip + whitespace collapse → xxh3-64 →
+  `spam_messages` dedup → CAS lookup → weighted n-gram phrase match. Verdicts
+  short-circuit; messages shorter than 48 normalized chars are Allowed
+  outright. The handler dispatches the resulting `Verdict::{Allow, Delete,
+  Ban}` through `ModerationService::apply` so the ledger row and the bot
+  side-effect stay paired. Wired into `telegram::handlers::message_gate`'s
+  verified-user fast path (admins skip; unverified users still go through
+  captcha). (server)
+- `services::cas_client::CasClient` — Combot Anti-Spam lookup with two-tier
+  cache: Moka 1 h front, Redis 24 h back, HTTP `{base_url}/check?user_id={id}`
+  on miss with a 3 s timeout. Any failure (network, 5xx, timeout) returns
+  `Verdict::Clean` (fail-open per docs — false positives are worse than
+  missed catches). Positive AND negative verdicts are write-through cached so
+  clean traffic doesn't hammer CAS. `base_url` is injected so wiremock
+  integration tests at `server/tests/cas_client.rs` can swap it. (server)
+- `services::moderation_service::ModerationService` — single source of truth
+  for ban / unban / delete (auto and manual). `apply()` writes the ledger row
+  via `INSERT … ON CONFLICT DO NOTHING RETURNING id`; on conflict the bot
+  call is skipped and the function returns `Outcome::AlreadyApplied`.
+  Non-fatal Telegram errors (bot not admin, user not in chat, message gone)
+  keep the ledger row to record intent; fatal errors roll the row back so a
+  retry can succeed. id-mode bans/unbans (`message_id IS NULL`) open a
+  transaction and `SELECT … FOR UPDATE` on the chat row before a behaviour
+  check (last terminal action == target?), serialising concurrent id-mode
+  attempts that the NULL-distinct unique constraint can't dedup on its own.
+  `is_moderator(chat_id, user_id)` reads `chat_moderators` with a Moka 5 min
+  cache; `invalidate_moderator` flushes a single (chat, user) entry after
+  external writes. Integration suite: `server/tests/moderation_service.rs`
+  covers message-scoped idempotency, id-mode atomicity, and unban-after-ban
+  via `teloxide_tests::MockBot`. (server)
+- spam phrase corpus ported from the Dart prototype
+  (`vixen/lib/src/anti_spam.dart` `$spamPhrases`). 115 entries, English +
+  Russian mix across finance / urgency / discounts / health / crypto /
+  gambling / loans / real-estate / courses / MLM categories, plus
+  obfuscated variants like `'для yдaлённoгo зaрaбoткa'`. Stored as a static
+  `LazyLock<PhraseSet>`; matches by substring on normalized text. Default
+  weight per phrase is 1.0; `chat_config.spam_weights` JSONB overrides
+  per-phrase. `score(normalized, &weights)` returns the aggregate score and
+  the matched-phrase list for the moderation ledger's `reason` JSON
+  (`{"matched_rules":["ngram"], "ngram_phrases":[…], "score":2.0,
+  "threshold":1.0}`). (server)
+- `/ban` and `/unban` slash commands. `/ban` accepts both reply-mode
+  (replied-to message — sets `message_id` on the ledger row) and id-mode
+  (`/ban <user_id> [reason]`). `/unban <user_id>` is id-only by design —
+  banned users have their messages deleted, so a reply target wouldn't
+  exist. Permission gate: moderator (DB row in `chat_moderators`, Moka 5 min
+  cache) OR chat admin (existing M1 admin cache, Redis 6 h TTL → live
+  `getChatAdministrators` fallback). Successful action best-effort deletes
+  the moderator's command message; non-moderators see "Only chat moderators
+  or admins can run /ban". A double-ban replies "User N is already banned"
+  instead of writing a duplicate ledger row. (server)
+- `services::spam::dedup` helpers — `lookup`, `bump`, `record` for the
+  `spam_messages` table. n-gram and CAS branches `record()` so subsequent
+  copies short-circuit at the dedup step in O(1). Sample bodies are
+  truncated to 4 KiB on a UTF-8 char boundary before storage. (server)
+- `jobs::spam_cleanup` background job. Tick every 24 h, cancel-aware. Single
+  `DELETE FROM spam_messages WHERE last_seen < NOW() - $retention_days`.
+  Configurable via `CONFIG_SPAM_RETENTION_DAYS` (default 14, matches the
+  Dart prototype). Wired into `jobs::spawn_all` alongside `captcha_expiry`.
+  Tests in `server/tests/spam_cleanup.rs` seed 1 d / 7 d / 20 d / 100 d rows
+  and assert only the > 14 d ones drop. (server)
+- spam corpus regression tests under `server/tests/spam_corpus/`:
+  `phrase_match.yaml`, `clean_messages.yaml`, `xxh3_dedup.yaml`. Loader in
+  `server/tests/spam_pipeline.rs` walks every YAML through
+  `SpamService::inspect` and asserts the labelled verdict per sample.
+  `must_ban_after_first` schema feeds dedup by running the same input
+  twice and expecting a Ban on the second pass. Adding a new spam rule
+  without corpus samples fails the test. (server)
+- `teloxide_tests = "0.2"` dev-dependency (the last release targeting
+  teloxide 0.13). Used by `tests/moderation_service.rs` for `MockBot` +
+  recorded API call assertions; future M3+ handler tests can build on the
+  same harness without re-doing scaffolding. (server)
+- `CONFIG_CAS_BASE_URL` (default `https://api.cas.chat`) — testable CAS
+  endpoint override. `CONFIG_SPAM_RETENTION_DAYS` (default 14) — spam
+  message retention window. (server)
+- `unicode-normalization` dependency for NFKC pass in
+  `services::spam::normalize`. (server)
 - captcha message gate. New non-command handler `telegram::handlers::message_gate` deletes every message from an unverified, non-admin user in a watched chat and (re-)issues a captcha on the spot if there's no live challenge already. Verified users bypass via the existing `cap:verified` Redis cache → PG fallback; chat admins bypass via a new `cap:admins:{chat_id}` JSON-list cache (6 h TTL, lazy-populated from `bot.get_chat_administrators` on miss). Wired into `telegram::dispatcher` after the `filter_command` branch so `/help`/`/status`/`/verify` keep working for unverified users. (server)
 - `CaptchaService::active_challenge_message_id(chat_id, user_id) -> Result<Option<Option<i32>>>` — non-destructive check used by the message gate to decide whether to reissue. Outer `Option` is "live row?", inner `Option<i32>` is the recorded `telegram_message_id` (may still be NULL if the gate fires between `issue_challenge` and `record_message_id`). Covered by a new integration test that walks all four states. (server)
 - `CaptchaState::set_admins` / `get_admins` — Redis-backed admin cache for the message gate. JSON-encoded `Vec<i64>` so a missing key stays distinguishable from an empty admin list with one round-trip. (server)
@@ -30,6 +109,9 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Changed
 
+- `AppState` gains `spam: Arc<SpamService>` and `moderation: Arc<ModerationService>`. `bin/server.rs` constructs the `Bot` before `AppState` (M2 services capture it) and wires `CasClient` + `SpamService` + `ModerationService` into the shared state. `jobs::spawn_all` spawns `spam_cleanup` alongside `captcha_expiry`. (server)
+- `telegram::handlers::message_gate` now runs `state.spam.inspect()` for verified non-admin messages with body text. Non-`Allow` verdicts are dispatched through `state.moderation.apply()`. The captcha gate (unverified non-admin path) is unchanged. Pipeline failures are logged at `warn!` but do not block the conversation — captcha is the hard guarantee, spam is defense in depth. (server)
+- `Command::Ban(String)` and `Command::Unban(String)` added to the `BotCommands` derive in `telegram::commands`; `set_my_commands` on startup publishes them to Telegram's command menu. `/help` text updated to enumerate all 5 commands. (server)
 - captcha policy pivot: **the bot no longer restricts or kicks anyone for failing or ignoring a captcha.** The only enforcement primitive is message deletion via the new `message_gate` handler (above). Removed: `bot.restrict_chat_member` from `member_update::handle` (join no longer mutes), the lift-restriction call from `commands::verify`, the `bot.kick_chat_member` + `unban_chat_member` round-trips from `captcha::on_kick` (renamed `on_failed`) and from `jobs::captcha_expiry::process_expired`. `Outcome::WrongFinal` and `Outcome::Expired` from `CaptchaService::solve()` no longer write a `kick` ledger row alongside `captcha_failed` / `captcha_expired` (M2 spam ban will own the `kick` action). The integration tests `solve_final_wrong_drops_row_and_writes_ledger` and `solve_expired_drops_row_and_writes_ledger` assert that `kick` rows are NOT written. The `kick` action stays in the `moderation_actions.action` CHECK constraint for the M2 spam-ban path. (server)
 - `captcha_expiry` background job is now batched and cancel-aware. The single unbounded `DELETE … WHERE expires_at < NOW() RETURNING …` is replaced by a `LIMIT 200` CTE-driven `DELETE` that loops until the queue is empty or the shutdown token fires; the token is also checked between rows in a batch. After a long downtime the queue drains in bounded chunks instead of one statement that could hold locks for seconds. Per-row cleanup is now just `bot.delete_message` (best-effort) + the `captcha_expired` audit row. (server)
 - captcha issuance now runs from two call sites: `chat_member` (fresh joiner, skipping owner/admin transitions) AND `message_gate` (every non-command message from an unverified non-admin user in a watched chat that has no live challenge already). Both paths funnel into the same `issue_challenge` + `send_photo` + `record_message_id` + `set_meta` sequence. (server)

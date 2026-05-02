@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE spam_messages\n        SET hit_count = hit_count + 1,\n            last_seen = NOW()\n        WHERE xxh3_hash = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f0ad7baf9bb48cdabb96659ef5bc09783c41d57a2ef5c804999041d47608c88c"
+}

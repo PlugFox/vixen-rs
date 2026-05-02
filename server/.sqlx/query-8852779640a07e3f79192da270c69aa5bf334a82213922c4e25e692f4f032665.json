@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM spam_messages\n        WHERE last_seen < NOW() - make_interval(days => $1::int)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8852779640a07e3f79192da270c69aa5bf334a82213922c4e25e692f4f032665"
+}

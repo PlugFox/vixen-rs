@@ -1,0 +1,20 @@
+# High-confidence negatives. Conversational messages, code-review chatter,
+# notifications, meeting reminders. The pipeline must NOT flag any of these
+# under default chat_config. New false-positive regressions land here.
+
+must_allow:
+  - "Кто-нибудь делал ревью PR #94 про captcha pipeline на прошлой неделе?"
+  - "Build #1247 passed on master after the migration squash, all green"
+  - "Развернул новую версию на staging, кажется работает но нужно потестить"
+  - "I'm seeing flaky tests in tests/cas_client.rs after the redis upgrade"
+  - "Завтра в 11:00 standup, кто будет — дайте знать заранее пожалуйста"
+  - "GitHub workflow для server-ci.yml упал на clippy, посмотрите когда сможете"
+  - "Has anyone else been getting Telegram API rate limit errors today?"
+  - "Поправил мигратор: теперь spam_messages.last_seen индексируется"
+  - "Pushed the fix to fix-captcha-race; opening PR shortly with the change"
+  - "Деплой в проде на полчаса задержим — нужно прогнать smoke на staging"
+  - "Just merged the M0 foundation PR, M1 captcha work can start"
+  - "Кто-нибудь знает где в docs описан формат moderation_actions.reason?"
+  - "Looks great to me — the new dedup table makes spam handling much cleaner"
+  - "Можем ли мы вынести спам-фразы в YAML на горячую загрузку через Redis?"
+  - "Спасибо за разбор! Поправлю комменты в imports и пушну заново сегодня"

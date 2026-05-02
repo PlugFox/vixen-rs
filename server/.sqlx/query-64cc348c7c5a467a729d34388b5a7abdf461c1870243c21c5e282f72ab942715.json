@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                spam_enabled    AS \"spam_enabled!\",\n                spam_threshold  AS \"spam_threshold!\",\n                spam_weights    AS \"spam_weights!: serde_json::Value\",\n                cas_enabled     AS \"cas_enabled!\"\n            FROM chat_config\n            WHERE chat_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "spam_enabled!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "spam_threshold!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 2,
+        "name": "spam_weights!: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "cas_enabled!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "64cc348c7c5a467a729d34388b5a7abdf461c1870243c21c5e282f72ab942715"
+}
