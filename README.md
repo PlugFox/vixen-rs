@@ -12,13 +12,27 @@ Active development. Implementation is staged across nine milestones (M0 through 
 
 ## Headline features
 
-- **CAPTCHA on join.** Every new member is restricted, presented with a WebP digit-pad on an inline keyboard, and only unrestricted on a correct solve. Wrong solves decrement attempts; expiry kicks (does not ban). Captcha assets are versioned and immutable to keep deterministic re-rendering tests sound.
-- **Spam pipeline.** `normalize → xxh3-64 dedup → CAS lookup → n-gram phrase match → ban / delete`. Idempotent under retry: every action goes through one `moderation_actions` ledger keyed `(chat_id, target_user_id, action, message_id)`, so retried updates never double-ban.
+- **CAPTCHA gate.** Every unverified non-admin user is shown a deterministic WebP digit-pad on an inline keyboard. The bot never restricts, mutes, or kicks — instead, all of an unverified user's messages are silently deleted and a fresh captcha is posted. They keep their chat membership and can keep retrying — third attempt, thirtieth, or never. Captcha assets are versioned and immutable to keep deterministic re-rendering tests sound.
+- **Zero-FP spam ban.** The bot bans on one signal only: a long-enough message recurring as the first pre-captcha message across multiple distinct accounts (xxh3-64 fingerprint of the gate's deletion stream). No CAS verdicts, no n-gram heuristics, no behavioural rules — just a signature no honest user can produce. Idempotent under retry: every action goes through one `moderation_actions` ledger keyed `(chat_id, target_user_id, action, message_id)`, so retried updates never double-ban.
 - **Daily reports.** Per chat, at the configured local hour: a Telegram MarkdownV2 message with ASCII pseudographics + counts + redacted top phrases + (optional) OpenAI summary, plus a WebP chart with a caption. Skipped automatically when activity is below threshold.
 - **Hot-reload configuration.** Most tunables — captcha policy, spam thresholds, report hour and timezone, OpenAI key and model, language — live in `chat_config` JSONB and are edited from the dashboard. Writes publish on Redis pub/sub `chat_config:{chat_id}`; in-process Moka caches invalidate within ~1s. No redeploy.
 - **Moderator dashboard.** Telegram Login or Telegram WebApp authenticated. Per-chat verified users, banned users, audit log, and config form. Bans, unbans, and verifies straight from the UI.
 - **Public chat report.** Indexable `/report/{chat_slug}` page with redacted aggregates: URLs, @mentions, and phone numbers replaced before publication. Same data is served to the in-Telegram WebApp opened by `/report`.
 - **Bot commands.** `/start`, `/help`, `/status`, `/stats`, `/verify`, `/ban`, `/unban`, `/info <user>`, `/report`.
+
+## How spam prevention works
+
+One design principle: **never punish on speculation.** The bot never mutes, restricts, or kicks. Bans fire only on a signal no honest user produces. The worst-case for a borderline user is "your message disappeared", never "you can't speak" or "you're out".
+
+1. **Captcha gate (M1).** Every unverified non-admin user is shown a 4-digit captcha with an on-screen keyboard. Until they solve it, every message they send is silently deleted and a fresh captcha is posted. They are never muted; they keep their chat membership and can keep trying — third attempt, thirtieth, or never. Failing the captcha is not a ban trigger; ignoring it isn't either. The captcha just sits there, gating their messages.
+
+2. **Hash-fingerprint of the deletion stream (M2).** Every message deleted by the gate is normalised (whitespace collapsed, casing folded, zero-width filtered) and hashed (xxh3-64). The bot tracks each unverified user's *first* pre-captcha message. When the same long-enough message recurs as the first pre-captcha message across multiple distinct accounts, the bot bans those accounts — spam bots reuse copy, real users don't.
+
+3. **What never triggers a ban.** Failing captcha. Ignoring captcha. A single message, however off-topic. A short message that collides with someone else's. New-account or odd-hour heuristics. Third-party blocklists. No false positives by construction: the only behaviour that matches the ban signature is "send the same long template from several accounts before any of them pass the gate", which is exactly what spam-bot operators do — and which honest users have no reason to do.
+
+4. **Why this is enough.** Even a spam message that slips past the fingerprint (unique copy per account, or short copy below the length floor) was already deleted by the captcha gate. The fingerprint upgrades a campaign-scale incident from "every message vanishes silently" to "the accounts behind the campaign are gone". The hand-off between (1) and (2) means the chat never sees spam content regardless of which path catches it.
+
+The captcha gate ships in M1; the cross-account hash-collision ban lands in M2. See [docs/roadmap.md](docs/roadmap.md) for milestone done-criteria.
 
 ## Stack
 
@@ -126,8 +140,8 @@ Per-component docs:
 | | Milestone | Ships |
 |---|---|---|
 | M0 | Foundation & infra | Server skeleton, Postgres + Redis, `/health`, polling stub, CI |
-| M1 | CAPTCHA pipeline (WebP) | Restrict + WebP digit-pad + solve / expire flow + `/verify` |
-| M2 | Spam pipeline | xxh3 dedup + CAS + n-gram + idempotent ledger + `/ban`, `/unban` |
+| M1 | CAPTCHA gate (WebP) | WebP digit-pad + delete-then-reissue gate + solve / expire flow + `/verify` (no restrict, no kick) |
+| M2 | Zero-FP spam ban | xxh3 fingerprint of pre-captcha first messages → cross-account ban + idempotent ledger + `/ban`, `/unban` |
 | M3 | Reports | Daily MarkdownV2 + WebP chart + optional OpenAI summary + `/stats`, `/report` stub |
 | M4 | Web foundation | Telegram WebApp HMAC + JWT + chat_config CRUD + Redis invalidation |
 | M5 | Moderator dashboard | SolidJS app: auth, settings form, audit log, ban/unban/verify, `/info` |
