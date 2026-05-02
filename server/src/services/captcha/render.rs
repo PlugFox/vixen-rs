@@ -5,7 +5,7 @@
 //! retry yields the same image, and the snapshot test in
 //! `tests/captcha/render.rs` pins the bytes for a fixed seed.
 
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use ab_glyph::{Font, FontRef, PxScale};
 use anyhow::{Result, anyhow, ensure};
 use image::{ImageBuffer, Rgba};
 use uuid::Uuid;
@@ -223,7 +223,6 @@ fn rasterize_digit(
     digit_color: [u8; 3],
 ) -> Result<()> {
     let scale = PxScale::from(scale_px);
-    let scaled = font.as_scaled(scale);
     let glyph_id = font.glyph_id(c);
     let glyph = glyph_id.with_scale(scale);
     let outlined = font
@@ -248,8 +247,6 @@ fn rasterize_digit(
 
     // Centre offset inside the glyph buffer — we want the glyph centred on cx/cy.
     let half_w = glyph_w as f32 / 2.0;
-    let half_h = scaled.ascent() / 2.0; // visual centre, not bbox centre
-    let _ = half_h; // suppress unused warning if future tweaks remove it
     let half_h = (glyph_h as f32) / 2.0;
 
     let theta = angle_deg.to_radians();

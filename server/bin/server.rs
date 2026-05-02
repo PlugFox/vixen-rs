@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::Parser;
 use teloxide::prelude::*;
+use teloxide::utils::command::BotCommands;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -18,7 +19,8 @@ use vixen_server::{
     config::Config,
     database::{Database, Redis, ensure_watched_chats},
     jobs,
-    services::captcha::{CaptchaService, Fonts},
+    services::captcha::{CaptchaService, CaptchaState, Fonts},
+    telegram::commands::Command,
     telegram::{WatchedChats, build_dispatcher},
     telemetry,
 };
@@ -85,12 +87,14 @@ async fn main() -> anyhow::Result<()> {
 
     let fonts = Fonts::load().context("load captcha fonts")?;
     let captcha = Arc::new(CaptchaService::new(db.pool().clone(), fonts));
+    let captcha_state = Arc::new(CaptchaState::new(redis.clone()));
 
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
         redis: redis.clone(),
         captcha: captcha.clone(),
+        captcha_state: captcha_state.clone(),
     };
 
     let http_handle = spawn_http(&config.address, state.clone(), cancel.clone())
@@ -98,6 +102,11 @@ async fn main() -> anyhow::Result<()> {
         .context("HTTP server failed to start")?;
 
     let bot = Bot::new(config.bot_token.expose());
+
+    if let Err(e) = bot.set_my_commands(Command::bot_commands()).await {
+        warn!(error = %e, "set_my_commands failed");
+    }
+
     let dispatcher_handle = spawn_dispatcher(bot.clone(), &config, state.clone(), cancel.clone());
     let job_handles = jobs::spawn_all(bot.clone(), state.clone(), cancel.clone());
 

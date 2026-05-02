@@ -63,6 +63,16 @@ async fn verify(bot: Bot, msg: Message, state: AppState, arg: &str) -> Result<()
         .verify_manual(msg.chat.id.0, target_user_id, actor.id.0 as i64)
         .await?;
 
+    // Populate the Redis verified cache so the next join skips a PG round-trip.
+    // Best-effort: a Redis miss here just means lazy fill on next join.
+    if let Err(e) = state
+        .captcha_state
+        .mark_verified(msg.chat.id.0, target_user_id)
+        .await
+    {
+        warn!(error = ?e, "redis mark_verified (verify_manual) failed");
+    }
+
     // Lift the restriction whether the user was already verified or not — the
     // restrict from the captcha join might still be in effect.
     if let Err(e) = bot

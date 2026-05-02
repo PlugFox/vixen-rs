@@ -83,6 +83,12 @@ Verification is per-chat. Hot-path query: primary-key lookup.
 | | | `UNIQUE (chat_id, user_id)` — one outstanding challenge per `(chat,user)` |
 | | | Index: `(expires_at)` for the expiry sweep |
 
+The captcha **in-progress digit input** (the partial string typed between
+button presses) and the **per-message callback meta** (owner_user_id +
+uuid_short for the ownership check) are NOT stored here — they live in
+Redis under `cap:input:{chat}:{user}` and `cap:meta:{chat}:{message}`,
+TTL = challenge lifetime. See [captcha.md § State storage](captcha.md#state-storage).
+
 ### `spam_messages`
 
 xxh3-64 hash → known spam signature.

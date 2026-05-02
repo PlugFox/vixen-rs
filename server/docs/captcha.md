@@ -1,5 +1,25 @@
 # Captcha Pipeline
 
+## State storage
+
+Captcha state is split between PostgreSQL (durable, the source of truth) and
+Redis (ephemeral UI scratchpad). The split is deliberate: PG holds anything a
+restart must survive; Redis holds anything that can vanish without harm
+(at worst the user has to press refresh).
+
+| State | Where | TTL | Source of truth |
+|---|---|---|---|
+| `captcha_challenges` (id, solution, attempts_left, expires_at, telegram_message_id) | PG | per-chat `captcha_lifetime_secs` (default 60s) | PG |
+| In-progress digit input | Redis `cap:input:{chat_id}:{user_id}` | = challenge lifetime | Redis (ephemeral UI state) |
+| Callback meta (owner_user_id, uuid_short, lifetime_secs) | Redis `cap:meta:{chat_id}:{message_id}` | = challenge lifetime | Redis (for O(1) ownership check without PG) |
+| `is_verified` cache | Redis `cap:verified:{chat_id}:{user_id}` = `"1"` | 7 days | PG (cache; PG is authoritative) |
+| `verified_users`, `moderation_actions` | PG | — | PG |
+
+All Redis keys live under the `cap:` namespace. Helpers are in
+`services/captcha/state.rs::CaptchaState`. A flaky Redis must degrade the
+captcha UI gracefully (callback handlers warn-log + silent return) — never
+panic up to the dispatcher.
+
 ## State machine
 
 ```
@@ -95,21 +115,41 @@ The user taps a digit on the inline keyboard. CallbackQuery `data` is
 challenge UUID and `op` is one of `0`..`9`, `bs` (backspace), `rf` (refresh).
 
 ```
-1. bot.answer_callback_query(q.id).await — first thing, so Telegram stops retrying.
-2. Parse data; if it doesn't start with "vc:", drop.
-3. Recover the current input length from the captioned mask
-   (○ = empty, ● = filled). Captcha state is otherwise stateless.
-4. op:
-   - "0".."9" — append; if length < 4: edit_message_caption with new mask.
-                if length == 4: state.captcha.solve(chat_id, user_id, input).
-   - "bs"     — pop last; edit_message_caption with new mask.
-   - "rf"     — state.captcha.reissue + edit_message_media + record_message_id.
-5. solve() outcomes:
-   Solved | AlreadyVerified  → bot.delete_message + bot.restrict_chat_member(all).
-   WrongLeft(n)              → edit_message_caption "Wrong, try again. Attempts left: n".
-   WrongFinal | Expired      → bot.delete_message + bot.unban + bot.kick + bot.unban.
-   NotFound                  → silent drop (delayed callback after cleanup).
+1. Parse data; if it doesn't start with "vc:" or fails to parse, drop.
+2. Look up `cap:meta:{chat}:{message}` in Redis.
+   - Miss → ack + return (TTL expired or restart wiped Redis).
+3. Ownership check: presser_id == meta.owner_user_id?
+   - No → answer_callback_query(text="This isn't your captcha", show_alert=false).
+          Toast is visible only to the presser; captcha is not touched.
+   - Yes → continue.
+4. Stale-callback check: parsed.short == meta.uuid_short?
+   - No → ack + silent drop (refresh issued a new uuid; the old keyboard's
+          buttons still carry the old short).
+5. ack the callback so Telegram stops retrying.
+6. Read input from `cap:input:{chat}:{owner}` (empty on miss).
+7. op:
+   - "0".."9" — append; if length < 4: SET cap:input + edit_message_caption.
+                if length == 4: state.captcha.solve(chat_id, owner_id, input).
+   - "bs"     — pop last; SET cap:input + edit_message_caption with new mask.
+   - "rf"     — DEL cap:input + DEL cap:meta + state.captcha.reissue +
+                edit_message_media + record_message_id + SET cap:meta with
+                the NEW challenge's short on the SAME message_id.
+8. solve() outcomes:
+   Solved | AlreadyVerified  → DEL cap:input + DEL cap:meta + SET cap:verified +
+                               bot.delete_message + bot.restrict_chat_member(all).
+   WrongLeft(n)              → keep cap:input + cap:meta (challenge still alive,
+                               TTL is NOT extended); edit_message_caption.
+   WrongFinal | Expired      → DEL cap:input + DEL cap:meta + bot.delete_message +
+                               bot.kick + bot.unban.
+   NotFound                  → DEL cap:input + DEL cap:meta + bot.delete_message
+                               (true vanish — ownership was already verified).
 ```
+
+The ownership check protects targets from disruption: without it, any other
+chat member could press buttons on a stranger's captcha and trigger
+`Outcome::NotFound` → `delete_message`, leaving the target restricted until
+the expiry job kicks them. The check is two Redis ops + a string compare,
+well within Telegram's ~15s callback-answer window.
 
 The kick = ban + unban round-trip implements "give up = leave, not banned
 forever" — the user can rejoin the chat.

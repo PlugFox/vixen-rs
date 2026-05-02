@@ -63,7 +63,7 @@ pub struct ModerationAction {
     pub action: String,
     pub actor_kind: String,
     pub actor_user_id: Option<i64>,
-    pub message_id: Option<i64>,
+    pub message_id: Option<i32>,
     pub reason: Option<String>,
     pub created_at: DateTime<Utc>,
 }

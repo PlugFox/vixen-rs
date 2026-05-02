@@ -60,7 +60,7 @@ async fn do_one_pass(bot: &Bot, state: &AppState) -> Result<()> {
 struct ExpiredRow {
     chat_id: i64,
     user_id: i64,
-    telegram_message_id: Option<i64>,
+    telegram_message_id: Option<i32>,
 }
 
 /// Delete every expired challenge in one statement and stream them back. The
@@ -92,9 +92,8 @@ async fn process_expired(bot: &Bot, pool: &PgPool, row: ExpiredRow) {
     let user_id = UserId(row.user_id as u64);
 
     if let Some(mid) = row.telegram_message_id {
-        let _ = bot.delete_message(chat_id, MessageId(mid as i32)).await;
+        let _ = bot.delete_message(chat_id, MessageId(mid)).await;
     }
-    let _ = bot.unban_chat_member(chat_id, user_id).await;
     if let Err(e) = bot.kick_chat_member(chat_id, user_id).await {
         warn!(error = %e, chat_id = row.chat_id, user_id = row.user_id, "kick failed");
     }

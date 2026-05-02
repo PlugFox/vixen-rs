@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::database::{Database, Redis};
-use crate::services::captcha::CaptchaService;
+use crate::services::captcha::{CaptchaService, CaptchaState};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -13,4 +13,9 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub redis: Arc<Redis>,
     pub captcha: Arc<CaptchaService>,
+    /// Ephemeral captcha state in Redis: in-progress digit input,
+    /// callback meta (owner + uuid_short keyed by message), and the
+    /// `is_verified` cache. PG owns the durable challenge row and
+    /// verified-user ledger; this is the UI scratchpad alongside it.
+    pub captcha_state: Arc<CaptchaState>,
 }

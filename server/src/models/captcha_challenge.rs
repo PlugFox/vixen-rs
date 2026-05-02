@@ -11,7 +11,7 @@ pub struct CaptchaChallenge {
     pub user_id: i64,
     pub solution: String,
     pub attempts_left: i16,
-    pub telegram_message_id: Option<i64>,
+    pub telegram_message_id: Option<i32>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }

@@ -6,4 +6,4 @@ pub mod commands;
 pub mod dispatcher;
 pub mod handlers;
 
-pub use dispatcher::{WatchedChats, allowed_updates, build_dispatcher};
+pub use dispatcher::{WatchedChats, build_dispatcher};

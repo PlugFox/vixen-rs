@@ -141,7 +141,7 @@ impl CaptchaService {
         &self,
         chat_id: i64,
         user_id: i64,
-        message_id: i64,
+        message_id: i32,
     ) -> Result<()> {
         sqlx::query!(
             r#"
@@ -164,23 +164,6 @@ impl CaptchaService {
     /// win.
     pub async fn solve(&self, chat_id: i64, user_id: i64, attempt: &str) -> Result<Outcome> {
         let mut tx = self.pool.begin().await.context("begin solve tx")?;
-
-        // Idempotent re-fire: if the user is already verified, the captcha row
-        // is already gone — just say so.
-        let already: bool = sqlx::query_scalar!(
-            r#"SELECT EXISTS(
-                SELECT 1 FROM verified_users WHERE chat_id = $1 AND user_id = $2
-            ) AS "exists!""#,
-            chat_id,
-            user_id,
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .context("verified_users idempotency check")?;
-        if already {
-            tx.commit().await?;
-            return Ok(Outcome::AlreadyVerified);
-        }
 
         let row = sqlx::query!(
             r#"
@@ -388,7 +371,11 @@ impl CaptchaService {
         Ok(row.unwrap_or(DEFAULT_ATTEMPTS))
     }
 
-    async fn lifetime_for(&self, chat_id: i64) -> Result<i32> {
+    /// Per-chat captcha lifetime (seconds). Public because the callback handler
+    /// uses it to compute the Redis TTL for the in-progress input buffer / meta
+    /// row at issuance time so the ephemeral state expires alongside the
+    /// challenge row in PG.
+    pub async fn lifetime_for(&self, chat_id: i64) -> Result<i32> {
         let row = sqlx::query_scalar!(
             r#"SELECT captcha_lifetime_secs FROM chat_config WHERE chat_id = $1"#,
             chat_id,

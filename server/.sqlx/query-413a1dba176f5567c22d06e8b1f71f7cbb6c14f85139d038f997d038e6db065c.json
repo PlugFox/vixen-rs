@@ -16,7 +16,7 @@
       {
         "ordinal": 2,
         "name": "telegram_message_id",
-        "type_info": "Int8"
+        "type_info": "Int4"
       }
     ],
     "parameters": {

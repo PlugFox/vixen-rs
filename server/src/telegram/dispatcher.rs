@@ -15,7 +15,6 @@ use std::sync::Arc;
 use teloxide::dispatching::{DefaultKey, Dispatcher};
 use teloxide::dptree;
 use teloxide::prelude::*;
-use teloxide::types::AllowedUpdate;
 use tracing::info;
 
 use crate::api::AppState;
@@ -50,6 +49,8 @@ impl WatchedChats {
 
 /// Build a teloxide `Dispatcher` with the M1 handler tree. The dispatcher
 /// drives polling itself; the caller stops it via `Dispatcher::shutdown_token()`.
+/// teloxide 0.13's `Dispatcher::dispatch` introspects the handler tree to
+/// derive the `allowed_updates` list, so we never have to enumerate it here.
 pub fn build_dispatcher(
     bot: Bot,
     watched: WatchedChats,
@@ -105,15 +106,4 @@ pub fn build_dispatcher(
         .error_handler(teloxide::error_handlers::LoggingErrorHandler::new())
         .enable_ctrlc_handler()
         .build()
-}
-
-/// Updates the bot subscribes to. teloxide defaults exclude `chat_member` —
-/// the captcha pipeline depends on it, so we list every variant we use.
-pub fn allowed_updates() -> Vec<AllowedUpdate> {
-    vec![
-        AllowedUpdate::Message,
-        AllowedUpdate::CallbackQuery,
-        AllowedUpdate::ChatMember,
-        AllowedUpdate::MyChatMember,
-    ]
 }

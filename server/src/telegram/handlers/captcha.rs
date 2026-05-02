@@ -1,8 +1,17 @@
 //! Captcha callback handler — the digit-pad keyboard buttons land here.
 //!
 //! Callback data scheme is `vc:{short}:{op}` (see `services::captcha::keyboard`).
-//! Captcha state is held in the message caption; the digit input is parsed
-//! from the mask the caption renders so we don't need extra DB writes per tap.
+//! Per-press state lives in Redis via `services::captcha::state::CaptchaState`:
+//!
+//!   * `cap:input:{chat}:{user}` — the digits typed so far (TTL = challenge lifetime).
+//!   * `cap:meta:{chat}:{message}` — owner_user_id + uuid_short + lifetime_secs.
+//!
+//! The meta row enables an O(1) ownership check: a callback whose presser does
+//! not match `meta.owner_user_id` is rejected with a "this isn't your captcha"
+//! toast (visible only to the presser) — without it any chat member could wipe
+//! a target's challenge by mashing buttons. The meta row is the source of
+//! truth for the press's identity, so we look it up *before* acking the
+//! callback (so non-owners actually see the toast).
 
 use anyhow::Result;
 use teloxide::payloads::EditMessageMediaSetters;
@@ -15,7 +24,7 @@ use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
 use crate::services::captcha::Outcome;
-use crate::services::captcha::keyboard::{OP_BACKSPACE, OP_REFRESH, parse_callback};
+use crate::services::captcha::keyboard::{OP_BACKSPACE, OP_REFRESH, parse_callback, short_id};
 
 const MASK_FILLED: char = '●';
 const MASK_EMPTY: char = '○';
@@ -29,9 +38,6 @@ const SOLUTION_LEN: usize = 4;
     )
 )]
 pub async fn handle(bot: Bot, q: CallbackQuery, state: AppState) -> Result<()> {
-    // Always ack the callback first so Telegram stops retrying.
-    let _ = bot.answer_callback_query(&q.id).await;
-
     let Some(data) = q.data.clone() else {
         return Ok(());
     };
@@ -47,23 +53,55 @@ pub async fn handle(bot: Bot, q: CallbackQuery, state: AppState) -> Result<()> {
         return Ok(());
     };
     let chat_id = msg.chat.id;
-    let user_id = q.from.id;
+    let presser_id = q.from.id;
     let message_id = msg.id;
 
-    let current_input = current_input_from_caption(msg.caption().unwrap_or(""));
+    // Look up meta BEFORE acking. If the meta is gone (TTL expired or restart
+    // wiped Redis), there's nothing meaningful to do; ack and bail.
+    let meta = match state.captcha_state.get_meta(chat_id.0, message_id.0).await {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            let _ = bot.answer_callback_query(&q.id).await;
+            return Ok(());
+        }
+        Err(e) => {
+            warn!(error = ?e, "redis get_meta failed");
+            let _ = bot.answer_callback_query(&q.id).await;
+            return Ok(());
+        }
+    };
+
+    // Ownership check. A non-owner gets a toast (visible only to them) and we
+    // do NOT touch the captcha. Telegram requires answer_callback_query within
+    // ~15s; the check itself is two Redis ops + a string compare.
+    if (presser_id.0 as i64) != meta.owner_user_id {
+        let _ = bot
+            .answer_callback_query(&q.id)
+            .text("This isn't your captcha.")
+            .show_alert(false)
+            .await;
+        return Ok(());
+    }
+
+    // Stale callback from a previous challenge (refresh issued a new uuid →
+    // the old keyboard's buttons still carry the old short). Silent drop.
+    if parsed.short != meta.uuid_short {
+        let _ = bot.answer_callback_query(&q.id).await;
+        return Ok(());
+    }
+
+    // Owner + matching short. Ack first so Telegram stops retrying.
+    let _ = bot.answer_callback_query(&q.id).await;
+
+    let owner_id = meta.owner_user_id;
+    let lifetime = meta.lifetime_secs;
 
     match parsed.op.as_str() {
-        OP_REFRESH => refresh(&bot, &state, chat_id, user_id, message_id).await,
-        OP_BACKSPACE => backspace(&bot, chat_id, user_id, message_id, current_input).await,
+        OP_REFRESH => refresh(&bot, &state, chat_id, message_id, owner_id).await,
+        OP_BACKSPACE => backspace(&bot, &state, chat_id, message_id, owner_id, lifetime).await,
         digit if digit.len() == 1 && digit.chars().next().unwrap().is_ascii_digit() => {
             digit_pressed(
-                &bot,
-                &state,
-                chat_id,
-                user_id,
-                message_id,
-                current_input,
-                digit,
+                &bot, &state, chat_id, presser_id, message_id, owner_id, lifetime, digit,
             )
             .await
         }
@@ -71,15 +109,23 @@ pub async fn handle(bot: Bot, q: CallbackQuery, state: AppState) -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn digit_pressed(
     bot: &Bot,
     state: &AppState,
     chat_id: ChatId,
-    user_id: UserId,
+    presser_id: UserId,
     message_id: teloxide::types::MessageId,
-    mut input: String,
+    owner_id: i64,
+    lifetime_secs: u64,
     digit: &str,
 ) -> Result<()> {
+    let mut input = state
+        .captcha_state
+        .get_input(chat_id.0, owner_id)
+        .await
+        .unwrap_or_default();
+
     if input.chars().count() >= SOLUTION_LEN {
         // Cap reached, ignore. (User has to backspace first.)
         return Ok(());
@@ -87,6 +133,13 @@ async fn digit_pressed(
     input.push_str(digit);
 
     if input.chars().count() < SOLUTION_LEN {
+        if let Err(e) = state
+            .captcha_state
+            .set_input(chat_id.0, owner_id, &input, lifetime_secs)
+            .await
+        {
+            warn!(error = ?e, "redis set_input failed");
+        }
         let _ = bot
             .edit_message_caption(chat_id, message_id)
             .caption(caption_for(&input))
@@ -96,25 +149,42 @@ async fn digit_pressed(
     }
 
     // Length == SOLUTION_LEN — try to solve.
-    match state
-        .captcha
-        .solve(chat_id.0, user_id.0 as i64, &input)
-        .await?
-    {
+    match state.captcha.solve(chat_id.0, owner_id, &input).await? {
         Outcome::Solved | Outcome::AlreadyVerified => {
-            on_solved(bot, chat_id, user_id, message_id).await;
+            clear_state(state, chat_id.0, owner_id, message_id.0).await;
+            if let Err(e) = state.captcha_state.mark_verified(chat_id.0, owner_id).await {
+                warn!(error = ?e, "redis mark_verified failed");
+            }
+            on_solved(bot, chat_id, presser_id, message_id).await;
         }
         Outcome::WrongLeft(left) => {
+            // Reset the input buffer so the user can immediately retry — the
+            // challenge row stays alive (attempts_left decremented in PG), but
+            // the typed digits are wiped both server-side and in the caption.
+            // Lifetime is fixed at issuance and intentionally NOT extended on
+            // wrong attempts (otherwise an attacker could farm wrong tries to
+            // keep the timer alive forever).
+            if let Err(e) = state.captcha_state.clear_input(chat_id.0, owner_id).await {
+                warn!(error = ?e, "redis clear_input (WrongLeft) failed");
+            }
             let _ = bot
                 .edit_message_caption(chat_id, message_id)
-                .caption(format!("Wrong, try again. Attempts left: {}", left))
+                .caption(format!(
+                    "Wrong, try again. Attempts left: {}\n{}",
+                    left,
+                    caption_for("")
+                ))
                 .await;
         }
         Outcome::WrongFinal | Outcome::Expired => {
-            on_kick(bot, chat_id, user_id, message_id).await;
+            clear_state(state, chat_id.0, owner_id, message_id.0).await;
+            on_kick(bot, chat_id, presser_id, message_id).await;
         }
         Outcome::NotFound => {
-            // Race: the row was already cleaned up. Best-effort: drop the message.
+            // Ownership was already verified above, so this is a true vanish:
+            // the challenge row was already cleaned up by the expiry job or a
+            // parallel solver. Drop the message + scrub Redis.
+            clear_state(state, chat_id.0, owner_id, message_id.0).await;
             let _ = bot.delete_message(chat_id, message_id).await;
         }
     }
@@ -123,12 +193,25 @@ async fn digit_pressed(
 
 async fn backspace(
     bot: &Bot,
+    state: &AppState,
     chat_id: ChatId,
-    _user_id: UserId,
     message_id: teloxide::types::MessageId,
-    mut input: String,
+    owner_id: i64,
+    lifetime_secs: u64,
 ) -> Result<()> {
+    let mut input = state
+        .captcha_state
+        .get_input(chat_id.0, owner_id)
+        .await
+        .unwrap_or_default();
     input.pop();
+    if let Err(e) = state
+        .captcha_state
+        .set_input(chat_id.0, owner_id, &input, lifetime_secs)
+        .await
+    {
+        warn!(error = ?e, "redis set_input failed");
+    }
     let _ = bot
         .edit_message_caption(chat_id, message_id)
         .caption(caption_for(&input))
@@ -140,10 +223,24 @@ async fn refresh(
     bot: &Bot,
     state: &AppState,
     chat_id: ChatId,
-    user_id: UserId,
     message_id: teloxide::types::MessageId,
+    owner_id: i64,
 ) -> Result<()> {
-    let issued = match state.captcha.reissue(chat_id.0, user_id.0 as i64).await {
+    // Wipe ephemeral UI state for the old challenge. The new challenge
+    // gets its own meta row written below; the old input buffer (if any)
+    // would otherwise survive the refresh and pre-fill the new keyboard.
+    if let Err(e) = state.captcha_state.clear_input(chat_id.0, owner_id).await {
+        warn!(error = ?e, "redis clear_input (refresh) failed");
+    }
+    if let Err(e) = state
+        .captcha_state
+        .clear_meta(chat_id.0, message_id.0)
+        .await
+    {
+        warn!(error = ?e, "redis clear_meta (refresh) failed");
+    }
+
+    let issued = match state.captcha.reissue(chat_id.0, owner_id).await {
         Ok(i) => i,
         Err(e) => {
             warn!(error = ?e, "reissue failed");
@@ -161,12 +258,41 @@ async fn refresh(
         .inspect_err(|e| warn!(error = %e, "edit_message_media failed"));
     if let Err(e) = state
         .captcha
-        .record_message_id(chat_id.0, user_id.0 as i64, message_id.0 as i64)
+        .record_message_id(chat_id.0, owner_id, message_id.0)
         .await
     {
         warn!(error = ?e, "record_message_id (refresh) failed");
     }
+
+    // Re-anchor meta to the same message_id with the NEW challenge's short.
+    // (Ownership of the new meta == owner of the previous meta — we just
+    // verified it in `handle()` before dispatching here.)
+    let lifetime = match state.captcha.lifetime_for(chat_id.0).await {
+        Ok(l) => l as u64,
+        Err(e) => {
+            warn!(error = ?e, "lifetime_for (refresh) failed; using 60s");
+            60
+        }
+    };
+    let new_short = short_id(issued.challenge_id);
+    if let Err(e) = state
+        .captcha_state
+        .set_meta(chat_id.0, message_id.0, owner_id, &new_short, lifetime)
+        .await
+    {
+        warn!(error = ?e, "redis set_meta (refresh) failed");
+    }
     Ok(())
+}
+
+/// Best-effort scrub of both Redis keys for a finished interaction.
+async fn clear_state(state: &AppState, chat_id: i64, owner_id: i64, message_id: i32) {
+    if let Err(e) = state.captcha_state.clear_input(chat_id, owner_id).await {
+        warn!(error = ?e, "redis clear_input failed");
+    }
+    if let Err(e) = state.captcha_state.clear_meta(chat_id, message_id).await {
+        warn!(error = ?e, "redis clear_meta failed");
+    }
 }
 
 async fn on_solved(
@@ -196,11 +322,10 @@ async fn on_kick(
     message_id: teloxide::types::MessageId,
 ) {
     let _ = bot.delete_message(chat_id, message_id).await;
-    let _ = bot.unban_chat_member(chat_id, user_id).await; // clear any restrict
     if let Err(e) = bot.kick_chat_member(chat_id, user_id).await {
         warn!(error = %e, "kick_chat_member failed");
     }
-    let _ = bot.unban_chat_member(chat_id, user_id).await; // kick = ban+unban
+    let _ = bot.unban_chat_member(chat_id, user_id).await; // kick = ban + immediate unban so user can rejoin
     info!(
         chat_id = chat_id.0,
         user_id = user_id.0 as i64,
@@ -214,17 +339,6 @@ fn caption_for(input: &str) -> String {
         .map(|i| if i < n { MASK_FILLED } else { MASK_EMPTY })
         .collect();
     format!("Solve the captcha: {mask}")
-}
-
-/// Recover the digits typed so far from the current caption. Counts
-/// `MASK_FILLED` characters; the actual digit values aren't needed here —
-/// `solve()` is called with the freshly-built input string when length hits
-/// SOLUTION_LEN. Until then the caption only has to render progress.
-fn current_input_from_caption(caption: &str) -> String {
-    // Best-effort heuristic: count MASK_FILLED chars; we only need the length
-    // because the final input is built up afresh via append/backspace.
-    let n = caption.chars().filter(|c| *c == MASK_FILLED).count();
-    "0".repeat(n.min(SOLUTION_LEN))
 }
 
 #[cfg(test)]
@@ -245,11 +359,5 @@ mod tests {
             caption_for("1234"),
             format!("Solve the captcha: {0}{0}{0}{0}", MASK_FILLED)
         );
-    }
-
-    #[test]
-    fn input_recovers_length_from_caption() {
-        let cap = caption_for("12");
-        assert_eq!(current_input_from_caption(&cap).len(), 2);
     }
 }

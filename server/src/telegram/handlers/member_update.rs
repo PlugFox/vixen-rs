@@ -12,6 +12,7 @@ use teloxide::types::{
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
+use crate::services::captcha::short_id;
 
 #[instrument(
     skip(bot, event, state),
@@ -27,13 +28,23 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
 
     let chat_id = event.chat.id;
     let user_id = event.new_chat_member.user.id;
+    let uid = user_id.0 as i64;
 
+    // Cache-then-PG: returning users hit Redis and skip a PG round-trip on
+    // every join event. Cache is best-effort — a Redis miss / error falls
+    // through to the authoritative PG check.
     if state
-        .captcha
-        .is_verified(chat_id.0, user_id.0 as i64)
-        .await?
+        .captcha_state
+        .is_verified_cached(chat_id.0, uid)
+        .await
+        .unwrap_or(false)
     {
-        info!("user already verified, skipping captcha");
+        info!("user already verified (cache hit), skipping captcha");
+        return Ok(());
+    }
+    if state.captcha.is_verified(chat_id.0, uid).await? {
+        let _ = state.captcha_state.mark_verified(chat_id.0, uid).await;
+        info!("user already verified (cache populated), skipping captcha");
         return Ok(());
     }
 
@@ -46,11 +57,7 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
         return Ok(());
     }
 
-    let issued = match state
-        .captcha
-        .issue_challenge(chat_id.0, user_id.0 as i64)
-        .await
-    {
+    let issued = match state.captcha.issue_challenge(chat_id.0, uid).await {
         Ok(c) => c,
         Err(e) => {
             warn!(error = ?e, "issue_challenge failed");
@@ -75,10 +82,28 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
         Ok(msg) => {
             if let Err(e) = state
                 .captcha
-                .record_message_id(chat_id.0, user_id.0 as i64, msg.id.0 as i64)
+                .record_message_id(chat_id.0, uid, msg.id.0)
                 .await
             {
                 warn!(error = ?e, "record_message_id failed");
+            }
+            // Anchor the callback ownership check to this specific message.
+            // Lifetime is the same value used to bound the PG row's expires_at,
+            // so meta + input both vanish from Redis when the challenge dies.
+            let lifetime = match state.captcha.lifetime_for(chat_id.0).await {
+                Ok(l) => l as u64,
+                Err(e) => {
+                    warn!(error = ?e, "lifetime_for failed; using 60s for meta TTL");
+                    60
+                }
+            };
+            let short = short_id(issued.challenge_id);
+            if let Err(e) = state
+                .captcha_state
+                .set_meta(chat_id.0, msg.id.0, uid, &short, lifetime)
+                .await
+            {
+                warn!(error = ?e, "redis set_meta failed");
             }
         }
         Err(e) => {
