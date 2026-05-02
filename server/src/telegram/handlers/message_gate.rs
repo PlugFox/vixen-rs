@@ -30,6 +30,7 @@ use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
 use crate::models::moderation_action::ActorKind;
+use crate::services::captcha::caption::caption_initial;
 use crate::services::captcha::short_id;
 use crate::services::moderation_service::{Action, ApplyContext};
 use crate::services::spam::service::Verdict;
@@ -100,11 +101,7 @@ async fn issue_and_post(
         }
     };
 
-    let caption = format!(
-        "{} please solve the captcha to start chatting.\nAttempts left: {}",
-        mention(user),
-        issued.attempts_left,
-    );
+    let caption = caption_initial(&mention(user), issued.attempts_left);
     let photo = InputFile::memory(issued.image_webp).file_name("captcha.webp");
     let sent = match bot
         .send_photo(chat_id, photo)

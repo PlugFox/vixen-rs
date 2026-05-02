@@ -2,12 +2,14 @@
 //! service that orchestrates challenge issuance / solving / expiry. See
 //! `server/docs/captcha.md` for the state machine and atomicity contract.
 
+pub mod caption;
 pub mod fonts;
 pub mod keyboard;
 pub mod render;
 pub mod service;
 pub mod state;
 
+pub use caption::{caption_initial, caption_progress, caption_wrong};
 pub use fonts::Fonts;
 pub use keyboard::{
     OP_BACKSPACE, OP_REFRESH, ParsedCallback, digit_pad, digit_pad_from_short, parse_callback,

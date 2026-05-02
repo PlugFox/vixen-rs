@@ -23,12 +23,11 @@ use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
 use crate::services::captcha::Outcome;
+use crate::services::captcha::caption::{caption_progress, caption_wrong};
 use crate::services::captcha::keyboard::{
     OP_BACKSPACE, OP_REFRESH, digit_pad_from_short, parse_callback, short_id,
 };
 
-const MASK_FILLED: char = '●';
-const MASK_EMPTY: char = '○';
 const SOLUTION_LEN: usize = 4;
 
 #[instrument(
@@ -165,7 +164,7 @@ async fn digit_pressed(
         }
         let _ = bot
             .edit_message_caption(chat_id, message_id)
-            .caption(caption_for(&input))
+            .caption(caption_progress(&input))
             .reply_markup(digit_pad_from_short(short))
             .await
             .inspect_err(|e| warn!(error = %e, "edit_message_caption failed"));
@@ -193,11 +192,7 @@ async fn digit_pressed(
             }
             let _ = bot
                 .edit_message_caption(chat_id, message_id)
-                .caption(format!(
-                    "Wrong, try again. Attempts left: {}\n{}",
-                    left,
-                    caption_for("")
-                ))
+                .caption(caption_wrong(left))
                 .reply_markup(digit_pad_from_short(short))
                 .await;
         }
@@ -243,7 +238,7 @@ async fn backspace(
     }
     let _ = bot
         .edit_message_caption(chat_id, message_id)
-        .caption(caption_for(&input))
+        .caption(caption_progress(&input))
         .reply_markup(digit_pad_from_short(short))
         .await;
     Ok(())
@@ -279,7 +274,7 @@ async fn refresh(
     };
     let media = InputMedia::Photo(
         InputMediaPhoto::new(InputFile::memory(issued.image_webp).file_name("captcha.webp"))
-            .caption(caption_for("")),
+            .caption(caption_progress("")),
     );
     let _ = bot
         .edit_message_media(chat_id, message_id, media)
@@ -355,33 +350,4 @@ async fn on_failed(
         user_id = user_id.0 as i64,
         "captcha failed; row cleared, user retains membership"
     );
-}
-
-fn caption_for(input: &str) -> String {
-    let n = input.chars().count();
-    let mask: String = (0..SOLUTION_LEN)
-        .map(|i| if i < n { MASK_FILLED } else { MASK_EMPTY })
-        .collect();
-    format!("Solve the captcha: {mask}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn caption_renders_progress_mask() {
-        assert_eq!(
-            caption_for(""),
-            format!("Solve the captcha: {MASK_EMPTY}{MASK_EMPTY}{MASK_EMPTY}{MASK_EMPTY}")
-        );
-        assert_eq!(
-            caption_for("12"),
-            format!("Solve the captcha: {MASK_FILLED}{MASK_FILLED}{MASK_EMPTY}{MASK_EMPTY}")
-        );
-        assert_eq!(
-            caption_for("1234"),
-            format!("Solve the captcha: {MASK_FILLED}{MASK_FILLED}{MASK_FILLED}{MASK_FILLED}")
-        );
-    }
 }

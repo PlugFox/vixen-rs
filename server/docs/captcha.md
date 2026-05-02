@@ -132,7 +132,7 @@ The flow itself is identical in both call sites:
    // INSERT … ON CONFLICT DO UPDATE … RETURNING.
    // Renderer runs inside spawn_blocking and produces a 480×180 lossless WebP.
 3. let msg = bot.send_photo(chat_id, InputFile::memory(issued.image_webp))
-                .caption(<mention> + " please solve the captcha …")
+                .caption(caption_initial(&mention, issued.attempts_left))
                 .reply_markup(issued.keyboard)
                 .await?;
 4. state.captcha.record_message_id(chat_id, user_id, msg.id.0).await?;

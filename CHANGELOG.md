@@ -11,6 +11,18 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Changed
+
+- captcha message captions redesigned for clarity. The progress mask now shows
+  the digits the user has actually typed (keycap emoji `1️⃣` for filled slots,
+  `⬜` for empty) instead of opaque `●` / `○` circles, so the user can verify
+  what they entered before the 4th press triggers a solve. Captions across the
+  lifecycle (initial issue, in-progress edit, wrong attempt, refresh) now share
+  a single renderer (`services::captcha::caption`), each sentence sits on its
+  own line, and short emoji headers (👋 / 🔐 / ❌ / 🎯) replace the previous
+  run-on text. Plain text only — no `parse_mode`, so user mentions still work
+  without MarkdownV2 escaping. (server)
+
 ### Added
 
 - M2 spam pipeline. `services::spam::SpamService::inspect(message)` runs the
