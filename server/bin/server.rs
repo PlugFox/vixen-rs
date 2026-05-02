@@ -130,6 +130,9 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    cancel.cancelled().await;
+    info!("shutdown initiated, draining tasks");
+
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, join).await {
         Ok(()) => info!("shutdown clean"),
         Err(_) => warn!(
