@@ -17,10 +17,6 @@ use vixen_server::services::summary_service::{SkipReason, SummaryOutcome, Summar
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-fn requires_postgres() -> bool {
-    std::env::var("DATABASE_URL").is_ok()
-}
-
 async fn build_service(pool: PgPool, base_url: String) -> Arc<SummaryService> {
     let client = Arc::new(OpenAiClient::new(base_url));
     SummaryService::new(pool, client)
@@ -76,11 +72,9 @@ async fn seed_allowed_messages(pool: &PgPool, chat_id: i64, count: i32) {
     }
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_skips_when_no_api_key(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, None, true, true, 50_000).await;
 
@@ -96,11 +90,9 @@ async fn summarize_skips_when_no_api_key(pool: PgPool) {
     ));
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_skips_when_disabled(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), false, true, 50_000).await;
 
@@ -116,11 +108,9 @@ async fn summarize_skips_when_disabled(pool: PgPool) {
     ));
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_skips_when_budget_exhausted(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, true, 100).await;
     daily_stats::increment(&pool, chat_id, Metric::OpenaiTokensUsed, 200)
@@ -142,11 +132,9 @@ async fn summarize_skips_when_budget_exhausted(pool: PgPool) {
     }
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_skips_when_no_messages(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, false, 50_000).await;
 
@@ -162,11 +150,9 @@ async fn summarize_skips_when_no_messages(pool: PgPool) {
     ));
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_generates_and_increments_tokens(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, true, 50_000).await;
     seed_allowed_messages(&pool, chat_id, 5).await;
@@ -205,11 +191,9 @@ async fn summarize_generates_and_increments_tokens(pool: PgPool) {
     assert_eq!(used, 123);
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_retries_on_429_then_succeeds(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, true, 50_000).await;
     seed_allowed_messages(&pool, chat_id, 3).await;
@@ -250,16 +234,14 @@ async fn summarize_retries_on_429_then_succeeds(pool: PgPool) {
     }
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_returns_error_when_retries_exhausted(pool: PgPool) {
     // Persistent 429 → after MAX_RETRIES the client surfaces an error. We
     // do NOT swallow this as `Skipped` — Skipped is for policy decisions,
     // transport failures must propagate so the caller can pick the right
     // user-facing message (or, in /summary's case, fall back to a generic
     // "временно недоступна" reply).
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, true, 50_000).await;
     seed_allowed_messages(&pool, chat_id, 3).await;
@@ -287,12 +269,10 @@ async fn summarize_returns_error_when_retries_exhausted(pool: PgPool) {
     );
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_propagates_non_retryable_4xx(pool: PgPool) {
     // 401 (bad key) is NOT retried. The error surfaces immediately.
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-bad"), true, true, 50_000).await;
     seed_allowed_messages(&pool, chat_id, 3).await;
@@ -314,14 +294,12 @@ async fn summarize_propagates_non_retryable_4xx(pool: PgPool) {
     assert!(result.is_err(), "401 must surface as Err");
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_sanitizes_outgoing_body(pool: PgPool) {
     // The user prompt the client sends to OpenAI must contain none of the
     // raw URL / phone / email / @-mention patterns from the input — only
     // their `[link]` / `[phone]` / `[email]` / `[user]` placeholders.
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, true, 50_000).await;
 
@@ -379,14 +357,12 @@ async fn summarize_sanitizes_outgoing_body(pool: PgPool) {
     }
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn summarize_skips_short_messages(pool: PgPool) {
     // The MIN_MESSAGE_CHARS filter drops sub-4-char messages; if every
     // logged message is short, the prompt is empty and the service
     // short-circuits to NoMessages without an HTTP call.
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_summary_chat(&pool, chat_id, Some("sk-test"), true, true, 50_000).await;
     for i in 0..5 {
