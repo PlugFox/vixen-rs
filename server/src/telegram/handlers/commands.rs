@@ -3,7 +3,6 @@
 
 use anyhow::Result;
 use teloxide::prelude::*;
-use teloxide::types::ChatPermissions;
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
@@ -73,19 +72,6 @@ async fn verify(bot: Bot, msg: Message, state: AppState, arg: &str) -> Result<()
         warn!(error = ?e, "redis mark_verified (verify_manual) failed");
     }
 
-    // Lift the restriction whether the user was already verified or not — the
-    // restrict from the captcha join might still be in effect.
-    if let Err(e) = bot
-        .restrict_chat_member(
-            msg.chat.id,
-            teloxide::types::UserId(target_user_id as u64),
-            ChatPermissions::all(),
-        )
-        .await
-    {
-        warn!(error = %e, "lift restriction in /verify failed");
-    }
-
     let reply = match outcome {
         Outcome::Solved => format!("Verified user {target_user_id}."),
         Outcome::AlreadyVerified => format!("User {target_user_id} was already verified."),
@@ -98,8 +84,11 @@ async fn verify(bot: Bot, msg: Message, state: AppState, arg: &str) -> Result<()
 }
 
 fn resolve_target(msg: &Message, arg: &str) -> Option<i64> {
+    // Telegram user IDs are positive (`u64` on the wire). Reject non-positive
+    // arguments here so callers can't accidentally cast a negative `i64` into
+    // a giant `u64` user_id when calling Telegram APIs downstream.
     if !arg.is_empty() {
-        return arg.parse::<i64>().ok();
+        return arg.parse::<i64>().ok().filter(|id| *id > 0);
     }
     let reply = msg.reply_to_message()?;
     Some(reply.from.as_ref()?.id.0 as i64)

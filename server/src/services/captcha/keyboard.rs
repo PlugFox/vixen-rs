@@ -23,6 +23,10 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use uuid::Uuid;
 
 pub const CALLBACK_PREFIX: &str = "vc";
+/// Same as `CALLBACK_PREFIX` plus the `:` separator. Used as a `&'static str`
+/// in the dispatcher's per-update filter so we don't allocate a `String` on
+/// every callback via `format!("{CALLBACK_PREFIX}:")`.
+pub const CALLBACK_PREFIX_WITH_COLON: &str = "vc:";
 pub const OP_BACKSPACE: &str = "bs";
 pub const OP_REFRESH: &str = "rf";
 

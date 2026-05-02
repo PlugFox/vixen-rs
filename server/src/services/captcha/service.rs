@@ -43,13 +43,14 @@ pub enum Outcome {
     AlreadyVerified,
     /// Wrong attempt; `n` attempts remain and the row is intact.
     WrongLeft(i16),
-    /// Final wrong attempt; the challenge row has been deleted and both
-    /// `captcha_failed` + `kick` ledger rows are written. Caller should kick
-    /// the user via Telegram.
+    /// Final wrong attempt; the challenge row has been deleted and a
+    /// `captcha_failed` ledger row is written. The user is NOT kicked — M1's
+    /// policy is to keep silently deleting their messages until they pass
+    /// captcha; the next message they send will trigger a fresh challenge.
     WrongFinal,
-    /// Challenge expired before being solved; the row has been deleted and
-    /// both `captcha_expired` + `kick` ledger rows are written. Caller should
-    /// kick the user via Telegram (the expiry-job sweep won't pick it up).
+    /// Challenge expired before being solved; the row has been deleted and a
+    /// `captcha_expired` ledger row is written. The user is NOT kicked — same
+    /// rationale as `WrongFinal`. The expiry-job sweep won't pick it up.
     Expired,
     /// No pending challenge for `(chat_id, user_id)`. Likely a delayed callback
     /// after the row was already cleaned up.
@@ -141,9 +142,35 @@ impl CaptchaService {
         self.issue_challenge(chat_id, user_id).await
     }
 
+    /// Returns `Some(telegram_message_id_or_none)` if there is a *live* (not
+    /// expired) captcha row for `(chat_id, user_id)`, `None` otherwise. The
+    /// outer `Option` distinguishes "no live challenge" from "live challenge
+    /// without a recorded message id yet" — both shapes the message-gate
+    /// branches on.
+    pub async fn active_challenge_message_id(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+    ) -> Result<Option<Option<i32>>> {
+        let row = sqlx::query!(
+            r#"
+            SELECT telegram_message_id
+            FROM captcha_challenges
+            WHERE chat_id = $1 AND user_id = $2 AND expires_at >= NOW()
+            "#,
+            chat_id,
+            user_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .context("SELECT captcha_challenges (active)")?;
+        Ok(row.map(|r| r.telegram_message_id))
+    }
+
     /// Persist the Telegram message id of the captcha photo so the expiry job
     /// can later `delete_message`. Best-effort: a missing row means the user
-    /// solved or got kicked between send_photo and this call — log + return.
+    /// solved or the row was swept between send_photo and this call —
+    /// log + return.
     pub async fn record_message_id(
         &self,
         chat_id: i64,
@@ -209,11 +236,10 @@ impl CaptchaService {
 
         if row.expires_at < Utc::now() {
             // Clean up inside the tx so the expiry job's sweep doesn't pick
-            // this row up later and fire a duplicate kick + duplicate ledger
-            // pair. We write both `captcha_expired` and `kick` here for
-            // symmetry with the job's two-row audit; the actual Telegram kick
-            // happens in the caller's `on_kick`. ON CONFLICT DO NOTHING keeps
-            // the ledger idempotent if the job races us.
+            // this row up later and produce a duplicate ledger row. The user
+            // is NOT kicked — M1's policy is "delete the message, show captcha
+            // again on next message". `ON CONFLICT DO NOTHING` keeps the ledger
+            // idempotent if the sweep races us.
             sqlx::query!(
                 r#"DELETE FROM captcha_challenges WHERE chat_id = $1 AND user_id = $2"#,
                 chat_id,
@@ -226,19 +252,6 @@ impl CaptchaService {
                 INSERT INTO moderation_actions
                     (chat_id, target_user_id, action, actor_kind, message_id, reason)
                 VALUES ($1, $2, 'captcha_expired', 'bot', $3, 'lifetime')
-                ON CONFLICT DO NOTHING
-                "#,
-                chat_id,
-                user_id,
-                row.telegram_message_id,
-            )
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query!(
-                r#"
-                INSERT INTO moderation_actions
-                    (chat_id, target_user_id, action, actor_kind, message_id, reason)
-                VALUES ($1, $2, 'kick', 'bot', $3, 'captcha_expired')
                 ON CONFLICT DO NOTHING
                 "#,
                 chat_id,
@@ -301,21 +314,6 @@ impl CaptchaService {
                 INSERT INTO moderation_actions
                     (chat_id, target_user_id, action, actor_kind, message_id, reason)
                 VALUES ($1, $2, 'captcha_failed', 'bot', $3, 'wrong-final')
-                ON CONFLICT DO NOTHING
-                "#,
-                chat_id,
-                user_id,
-                row.telegram_message_id,
-            )
-            .execute(&mut *tx)
-            .await?;
-            // Mirror the expiry-path audit: a kick row alongside the cause.
-            // The handler fires the actual Telegram kick after this commits.
-            sqlx::query!(
-                r#"
-                INSERT INTO moderation_actions
-                    (chat_id, target_user_id, action, actor_kind, message_id, reason)
-                VALUES ($1, $2, 'kick', 'bot', $3, 'captcha_failed')
                 ON CONFLICT DO NOTHING
                 "#,
                 chat_id,

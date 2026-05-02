@@ -1,5 +1,25 @@
 # Captcha Pipeline
 
+## Policy (M1)
+
+The bot **never restricts and never kicks** users for failing or ignoring a
+captcha. The only enforcement primitive is **message deletion**: every message
+from an unverified, non-admin user is silently deleted, and a fresh captcha is
+issued (or the existing one re-anchored). A user who never solves the captcha
+just has every message they send disappear; eventually the M2 spam pipeline
+will catch them on duplicate-message hashing and ban them, or they leave.
+
+Concretely:
+
+- No `restrict_chat_member` calls anywhere in the captcha pipeline.
+- No `kick_chat_member` / `unban_chat_member` calls anywhere.
+- The expiry job only deletes the captcha photo and writes a `captcha_expired`
+  audit row.
+- `Outcome::Expired` and `Outcome::WrongFinal` from `solve()` only delete the
+  challenge row + write a `captcha_expired` / `captcha_failed` audit row.
+- The `kick` action remains in the `moderation_actions.action` CHECK constraint
+  for the M2 spam-ban path, but M1 code never writes one.
+
 ## State storage
 
 Captcha state is split between PostgreSQL (durable, the source of truth) and
@@ -13,6 +33,7 @@ restart must survive; Redis holds anything that can vanish without harm
 | In-progress digit input | Redis `cap:input:{chat_id}:{user_id}` | = challenge lifetime | Redis (ephemeral UI state) |
 | Callback meta (owner_user_id, uuid_short, lifetime_secs) | Redis `cap:meta:{chat_id}:{message_id}` | = challenge lifetime | Redis (for O(1) ownership check without PG) |
 | `is_verified` cache | Redis `cap:verified:{chat_id}:{user_id}` = `"1"` | 7 days | PG (cache; PG is authoritative) |
+| Chat admins | Redis `cap:admins:{chat_id}` = JSON `Vec<i64>` | 6 hours | TG `get_chat_administrators` (cache) |
 | `verified_users`, `moderation_actions` | PG | — | PG |
 
 All Redis keys live under the `cap:` namespace. Helpers are in
@@ -24,35 +45,38 @@ panic up to the dispatcher.
 
 ```
                     ┌──────────────────┐
-                    │     (no row)     │
-                    └────────┬─────────┘
-                             │ join → issue_challenge
-                             ▼
-                    ┌──────────────────┐
-            ┌──────▶│      Issued      │◀──────┐
-            │       └────────┬─────────┘       │
-            │                │ digit press     │ refresh
-            │                ▼                 │
-            │       ┌──────────────────┐       │
-            │       │   InputBuilding  │───────┘
-            │       │ (caption mask)   │
-            │       └────────┬─────────┘
-            │                │ length == 4
-            │                ▼
-            │       ┌──────────────────┐
-            │       │  solve(input)    │
-            │       └─┬────┬────┬────┬─┘
-            │         │    │    │    │
-            │ wrong   │    │    │    └─ correct
-            └─────────┘    │    │              │
-                  attempts │    │ final wrong  ▼
-                           ▼    ▼          ┌────────┐
-                    expired │ kicked       │ Solved │
-                           ▼  │            └────────┘
-                    ┌──────────┴────────┐
-                    │   row deleted +   │
-                    │   user kicked     │
-                    └───────────────────┘
+                    │     (no row)     │◀───────┐
+                    └────────┬─────────┘        │
+              join OR        │                  │
+              unverified-msg │ issue_challenge  │
+                             ▼                  │
+                    ┌──────────────────┐        │
+            ┌──────▶│      Issued      │◀──────┐│
+            │       └────────┬─────────┘       ││
+            │                │ digit press     ││
+            │                ▼                 ││
+            │       ┌──────────────────┐       ││
+            │       │   InputBuilding  │───────┘│ refresh
+            │       │ (caption mask)   │        │
+            │       └────────┬─────────┘        │
+            │                │ length == 4      │
+            │                ▼                  │
+            │       ┌──────────────────┐        │
+            │       │  solve(input)    │        │
+            │       └─┬────┬────┬────┬─┘        │
+            │         │    │    │    │          │
+            │ wrong   │    │    │    └─ correct │
+            └─────────┘    │    │           │   │
+                  attempts │    │ final     ▼   │
+                  expired  ▼    ▼ wrong ┌────────┐
+                       ┌─────────────┐  │ Solved │
+                       │ row deleted │  └────────┘
+                       │ photo gone; │
+                       │ user stays  │
+                       │ in chat,    │
+                       │ unverified  │──────────┘
+                       └─────────────┘   next message →
+                                         issue_challenge
 ```
 
 `Reissued` is a self-loop on the same `(chat_id, user_id)` row: the refresh
@@ -66,10 +90,11 @@ Every transition runs in a single transaction:
 | Transition | Statements | Notes |
 |---|---|---|
 | issue / reissue | `INSERT … ON CONFLICT (chat_id,user_id) DO UPDATE SET id, solution, attempts_left, telegram_message_id=NULL, expires_at, created_at=NOW() RETURNING id, attempts_left, expires_at` | Single statement; image render happens *after* the row is durable so a crash never leaves an orphan image. |
-| solve (correct) | `BEGIN; SELECT EXISTS verified_users; SELECT … FOR UPDATE; DELETE captcha_challenges; INSERT verified_users ON CONFLICT DO NOTHING; INSERT moderation_actions ON CONFLICT DO NOTHING; COMMIT` | The early `verified_users` probe makes a re-fired callback after a successful solve return `AlreadyVerified` instead of re-running. |
-| solve (wrong, n>1) | `BEGIN; SELECT EXISTS verified_users; SELECT … FOR UPDATE; UPDATE captcha_challenges SET attempts_left = $1; COMMIT` | Each tap decrements once; `FOR UPDATE` serialises parallel callbacks on the same row. |
-| solve (wrong, final) | `BEGIN; …; DELETE captcha_challenges; INSERT moderation_actions (action='captcha_failed') ON CONFLICT DO NOTHING; COMMIT` | The handler then issues `kick_chat_member` + `unban_chat_member` and writes a second ledger row `action='kick'`. |
-| expiry | `DELETE FROM captcha_challenges WHERE expires_at < NOW() RETURNING …` | Atomic delete-and-stream. The job then performs the bot-side cleanup per row. |
+| solve (correct) | `BEGIN; SELECT … FOR UPDATE; DELETE captcha_challenges; INSERT verified_users ON CONFLICT DO NOTHING; INSERT moderation_actions (action='verify') ON CONFLICT DO NOTHING; COMMIT` | A re-fired callback after a successful solve hits the `NotFound` branch and re-checks `verified_users`, returning `AlreadyVerified`. |
+| solve (wrong, n>1) | `BEGIN; SELECT … FOR UPDATE; UPDATE captcha_challenges SET attempts_left = $1; COMMIT` | Each tap decrements once; `FOR UPDATE` serialises parallel callbacks on the same row. |
+| solve (wrong, final) | `BEGIN; …; DELETE captcha_challenges; INSERT moderation_actions (action='captcha_failed') ON CONFLICT DO NOTHING; COMMIT` | The handler drops the captcha photo. **No kick.** The user stays in the chat; their next message will trip the gate and issue a fresh challenge. |
+| solve (expired) | `BEGIN; …; DELETE captcha_challenges; INSERT moderation_actions (action='captcha_expired') ON CONFLICT DO NOTHING; COMMIT` | Cleanup runs inside the locking tx so the expiry job's sweep doesn't fire a duplicate ledger row. **No kick.** |
+| expiry sweep | `DELETE FROM captcha_challenges WHERE id IN (SELECT id WHERE expires_at < NOW() ORDER BY expires_at LIMIT 200) RETURNING …` | Bounded batch; loop until empty or shutdown is requested. The job then performs the bot-side `delete_message` per row and writes the `captcha_expired` audit row. |
 
 Image rendering (`services/captcha/render.rs`) is a pure function — no I/O,
 no globals — so it can be wrapped in `tokio::task::spawn_blocking` without
@@ -90,23 +115,32 @@ issuing — re-issuing a captcha to a verified user is a bug.
 
 ## Issuance
 
+Issuance fires from two places:
+
+- **`chat_member` handler** (`telegram::handlers::member_update`) when a fresh
+  joiner appears. Skipped for owner/admin transitions (we don't ask admins to
+  prove they're human).
+- **Message gate** (`telegram::handlers::message_gate`) on every non-command
+  message from an unverified non-admin user, *if* they have no live captcha
+  row already. The user's message is deleted before the new captcha is posted.
+
+The flow itself is identical in both call sites:
+
 ```
-1. Skip if state.captcha.is_verified(chat_id, user_id).
-2. bot.restrict_chat_member(chat_id, user_id, ChatPermissions::empty()).
-3. let issued = state.captcha.issue_challenge(chat_id, user_id).await?;
+1. Skip if state.captcha.is_verified(chat_id, user_id) (cache → PG fallback).
+2. let issued = state.captcha.issue_challenge(chat_id, user_id).await?;
    // INSERT … ON CONFLICT DO UPDATE … RETURNING.
    // Renderer runs inside spawn_blocking and produces a 480×180 lossless WebP.
-4. let msg = bot.send_photo(chat_id, InputFile::memory(issued.image_webp))
-                .caption("Solve the captcha: ○○○○")
+3. let msg = bot.send_photo(chat_id, InputFile::memory(issued.image_webp))
+                .caption(<mention> + " please solve the captcha …")
                 .reply_markup(issued.keyboard)
                 .await?;
-5. state.captcha.record_message_id(chat_id, user_id, msg.id.0 as i64).await?;
+4. state.captcha.record_message_id(chat_id, user_id, msg.id.0).await?;
+5. state.captcha_state.set_meta(chat_id, msg.id.0, user_id, &short, lifetime).await?;
 ```
 
-Steps 2 / 4 / 5 are best-effort: a failure logs at warn and the
-`captcha_expiry` job will lift the restriction and clean up within 60 s.
-The DB row from step 3 must be durable before any bot call so the expiry
-job can find it on a crash.
+Steps 3 / 4 / 5 are best-effort: a failure logs at warn. The DB row from step
+2 must be durable before any bot call so the expiry job can find it on a crash.
 
 ## Solve flow
 
@@ -136,23 +170,20 @@ challenge UUID and `op` is one of `0`..`9`, `bs` (backspace), `rf` (refresh).
                 the NEW challenge's short on the SAME message_id.
 8. solve() outcomes:
    Solved | AlreadyVerified  → DEL cap:input + DEL cap:meta + SET cap:verified +
-                               bot.delete_message + bot.restrict_chat_member(all).
+                               bot.delete_message.
    WrongLeft(n)              → keep cap:input + cap:meta (challenge still alive,
                                TTL is NOT extended); edit_message_caption.
-   WrongFinal | Expired      → DEL cap:input + DEL cap:meta + bot.delete_message +
-                               bot.kick + bot.unban.
+   WrongFinal | Expired      → DEL cap:input + DEL cap:meta + bot.delete_message.
+                               No kick. The user remains in the chat; their next
+                               message will trip the gate and issue a fresh challenge.
    NotFound                  → DEL cap:input + DEL cap:meta + bot.delete_message
                                (true vanish — ownership was already verified).
 ```
 
 The ownership check protects targets from disruption: without it, any other
 chat member could press buttons on a stranger's captcha and trigger
-`Outcome::NotFound` → `delete_message`, leaving the target restricted until
-the expiry job kicks them. The check is two Redis ops + a string compare,
-well within Telegram's ~15s callback-answer window.
-
-The kick = ban + unban round-trip implements "give up = leave, not banned
-forever" — the user can rejoin the chat.
+`Outcome::NotFound` → `delete_message`. The check is two Redis ops + a string
+compare, well within Telegram's ~15s callback-answer window.
 
 ## Refresh
 
@@ -164,11 +195,21 @@ user sees a new picture with no incidental flicker.
 ## Expiry
 
 `captcha_expiry` background job, every 60 s
-(`src/jobs/captcha_expiry.rs`):
+(`src/jobs/captcha_expiry.rs`). The sweep is **batched** (`LIMIT 200` per
+statement, looped until empty) and **cancel-aware** (the shutdown token is
+checked between batches and between rows in a batch) so that after a long
+downtime the queue drains in bounded chunks instead of one giant statement
+that would block shutdown.
 
 ```sql
+-- One batch per iteration; loop until the batch is empty or shutdown fires.
 DELETE FROM captcha_challenges
-WHERE expires_at < NOW()
+WHERE id IN (
+    SELECT id FROM captcha_challenges
+    WHERE expires_at < NOW()
+    ORDER BY expires_at
+    LIMIT 200
+)
 RETURNING chat_id, user_id, telegram_message_id;
 ```
 
@@ -176,19 +217,15 @@ For each returned row:
 
 ```
 bot.delete_message(chat_id, telegram_message_id);  -- best-effort
-bot.unban_chat_member(chat_id, user_id);           -- clear restrict if any
-bot.kick_chat_member(chat_id, user_id);            -- actual kick
-bot.unban_chat_member(chat_id, user_id);           -- kick = ban + unban
 INSERT INTO moderation_actions … action='captcha_expired' actor_kind='bot'
-    ON CONFLICT DO NOTHING;
-INSERT INTO moderation_actions … action='kick'            actor_kind='bot'
     ON CONFLICT DO NOTHING;
 ```
 
-The job is idempotent: a re-run after a crash just finds zero expired rows.
-The `ON CONFLICT DO NOTHING` clauses cover the case where the same
+**No kick.** M1 policy is "delete the message, give them a fresh captcha next
+time they speak". The job is idempotent: a re-run after a crash just finds
+zero expired rows. `ON CONFLICT DO NOTHING` covers the case where the same
 `(chat_id, target_user_id, action, message_id)` row was already written by
-a previous, partially-succeeded pass.
+`solve()`'s expired-during-solve path.
 
 ## Asset immutability
 
@@ -250,19 +287,20 @@ Tests assert this by rendering twice and `assert_eq!(bytes_a, bytes_b)`.
 
 | Failure | Effect | Recovery |
 |---|---|---|
-| Image render panics | `issue_challenge` returns `Err`; user sees no captcha; restrict is still applied | `captcha_expiry` lifts restrict in ≤ 60 s |
-| `restrict_chat_member` fails (bot not admin) | Captcha is skipped, ledger is empty | Surface in `/status` (M2) so a moderator notices |
-| `bot.send_photo` fails (TG outage) | DB row exists with `telegram_message_id = NULL`; user is restricted | `captcha_expiry` deletes the row + lifts restrict in ≤ 60 s |
-| Delayed callback after solve | Service returns `AlreadyVerified`, handler deletes the message and lifts restrict (a no-op if already lifted) | None |
+| Image render panics | `issue_challenge` returns `Err`; user sees no captcha; their messages keep getting deleted by the gate | Next message gate run retries `issue_challenge` |
+| `bot.delete_message` fails (bot not admin) | Unverified user's messages stay visible | Operator sees the warn; needs to grant the bot delete-message permission |
+| `bot.send_photo` fails (TG outage) | DB row may exist with `telegram_message_id = NULL`; user is unrestricted but unverified | `captcha_expiry` cleans up the orphan; next message re-issues |
+| Delayed callback after solve | Service returns `AlreadyVerified`, handler deletes the captcha photo (no restrict to lift) | None |
 | Concurrent solve (two taps in flight) | `SELECT … FOR UPDATE` serialises; loser sees `AlreadyVerified` (or `NotFound` only if challenge was already deleted by an unrelated path) | None |
 | User leaves before solving | Row stays; expiry job sweeps it | None |
 
 ## Related
 
-- Service: `src/services/captcha/service.rs` — `CaptchaService` with `issue_challenge`, `solve`, `reissue`, `verify_manual`, `is_verified`, `record_message_id`.
+- Service: `src/services/captcha/service.rs` — `CaptchaService` with `issue_challenge`, `solve`, `reissue`, `verify_manual`, `is_verified`, `record_message_id`, `active_challenge_message_id`.
 - Renderer: `src/services/captcha/render.rs`.
 - Keyboard: `src/services/captcha/keyboard.rs`.
-- Handlers: `src/telegram/handlers/{member_update,captcha,commands}.rs`.
+- Ephemeral state (Redis): `src/services/captcha/state.rs` — input buffer, callback meta, verified cache, admin cache.
+- Handlers: `src/telegram/handlers/{member_update,captcha,commands,message_gate}.rs`.
 - Expiry job: `src/jobs/captcha_expiry.rs`.
 - Rules: `src/docs/rules/telegram-handlers.md`, `src/docs/rules/background-jobs.md`, `src/docs/rules/migrations.md`.
 - Tests: `tests/captcha.rs`.

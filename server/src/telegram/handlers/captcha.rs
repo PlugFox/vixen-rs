@@ -17,8 +17,7 @@ use anyhow::Result;
 use teloxide::payloads::EditMessageMediaSetters;
 use teloxide::prelude::*;
 use teloxide::types::{
-    ChatId, ChatPermissions, InputFile, InputMedia, InputMediaPhoto, MaybeInaccessibleMessage,
-    UserId,
+    ChatId, InputFile, InputMedia, InputMediaPhoto, MaybeInaccessibleMessage, UserId,
 };
 use tracing::{info, instrument, warn};
 
@@ -120,11 +119,13 @@ async fn digit_pressed(
     lifetime_secs: u64,
     digit: &str,
 ) -> Result<()> {
-    let mut input = state
-        .captcha_state
-        .get_input(chat_id.0, owner_id)
-        .await
-        .unwrap_or_default();
+    let mut input = match state.captcha_state.get_input(chat_id.0, owner_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = ?e, "redis get_input failed; treating as empty buffer");
+            String::new()
+        }
+    };
 
     if input.chars().count() >= SOLUTION_LEN {
         // Cap reached, ignore. (User has to backspace first.)
@@ -178,7 +179,7 @@ async fn digit_pressed(
         }
         Outcome::WrongFinal | Outcome::Expired => {
             clear_state(state, chat_id.0, owner_id, message_id.0).await;
-            on_kick(bot, chat_id, presser_id, message_id).await;
+            on_failed(bot, chat_id, presser_id, message_id).await;
         }
         Outcome::NotFound => {
             // Ownership was already verified above, so this is a true vanish:
@@ -199,11 +200,13 @@ async fn backspace(
     owner_id: i64,
     lifetime_secs: u64,
 ) -> Result<()> {
-    let mut input = state
-        .captcha_state
-        .get_input(chat_id.0, owner_id)
-        .await
-        .unwrap_or_default();
+    let mut input = match state.captcha_state.get_input(chat_id.0, owner_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = ?e, "redis get_input failed; backspace on empty buffer");
+            String::new()
+        }
+    };
     input.pop();
     if let Err(e) = state
         .captcha_state
@@ -302,12 +305,6 @@ async fn on_solved(
     message_id: teloxide::types::MessageId,
 ) {
     let _ = bot.delete_message(chat_id, message_id).await;
-    if let Err(e) = bot
-        .restrict_chat_member(chat_id, user_id, ChatPermissions::all())
-        .await
-    {
-        warn!(error = %e, "lift restriction after solve failed");
-    }
     info!(
         chat_id = chat_id.0,
         user_id = user_id.0 as i64,
@@ -315,21 +312,21 @@ async fn on_solved(
     );
 }
 
-async fn on_kick(
+/// Final wrong attempt or expired-during-solve. M1 policy: no kick. We just
+/// drop the captcha photo + scrub Redis. The user keeps their membership;
+/// their next message will be deleted by `message_gate` and a fresh captcha
+/// will be issued.
+async fn on_failed(
     bot: &Bot,
     chat_id: ChatId,
     user_id: UserId,
     message_id: teloxide::types::MessageId,
 ) {
     let _ = bot.delete_message(chat_id, message_id).await;
-    if let Err(e) = bot.kick_chat_member(chat_id, user_id).await {
-        warn!(error = %e, "kick_chat_member failed");
-    }
-    let _ = bot.unban_chat_member(chat_id, user_id).await; // kick = ban + immediate unban so user can rejoin
     info!(
         chat_id = chat_id.0,
         user_id = user_id.0 as i64,
-        "captcha failed → kicked"
+        "captcha failed; row cleared, user retains membership"
     );
 }
 

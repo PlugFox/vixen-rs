@@ -1,12 +1,13 @@
 //! `chat_member` updates — issue a captcha to every fresh joiner.
 //!
-//! Order of operations is important: we restrict the user **before** we know
-//! if the captcha can be issued, so even if image rendering or send_photo
-//! fails the joiner stays muted until the expiry sweep cleans up.
+//! M1 policy: we do **not** restrict or kick the user. The captcha is purely
+//! a gate — if they fail or ignore it, their messages keep getting deleted by
+//! `message_gate` until they pass. So this handler only sends the photo and
+//! anchors the Redis meta; no `restrict_chat_member` call.
 
 use anyhow::Result;
 use teloxide::prelude::*;
-use teloxide::types::{ChatMemberKind, ChatMemberUpdated, ChatPermissions, InputFile};
+use teloxide::types::{ChatMemberKind, ChatMemberUpdated, InputFile};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
@@ -21,6 +22,13 @@ use crate::services::captcha::short_id;
 )]
 pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Result<()> {
     if !is_fresh_join(&event) {
+        return Ok(());
+    }
+    if matches!(
+        event.new_chat_member.kind,
+        ChatMemberKind::Owner(_) | ChatMemberKind::Administrator(_)
+    ) {
+        info!("admin/owner join, skipping captcha");
         return Ok(());
     }
 
@@ -43,15 +51,6 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
     if state.captcha.is_verified(chat_id.0, uid).await? {
         let _ = state.captcha_state.mark_verified(chat_id.0, uid).await;
         info!("user already verified (cache populated), skipping captcha");
-        return Ok(());
-    }
-
-    // Restrict first; the captcha is best-effort but the silence is mandatory.
-    if let Err(e) = bot
-        .restrict_chat_member(chat_id, user_id, ChatPermissions::empty())
-        .await
-    {
-        warn!(error = %e, "restrict_chat_member failed (bot likely not admin)");
         return Ok(());
     }
 
@@ -107,7 +106,7 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
         Err(e) => {
             warn!(
                 error = %e,
-                "send_photo failed; expiry job will kick the user after the challenge timeout"
+                "send_photo failed; user remains unverified — message_gate will issue a fresh captcha on their next message"
             );
         }
     }

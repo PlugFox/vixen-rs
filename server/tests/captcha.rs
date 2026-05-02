@@ -153,7 +153,7 @@ async fn solve_wrong_decrements_attempts(pool: PgPool) {
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires running postgres on localhost:5432"]
-async fn solve_final_wrong_kicks(pool: PgPool) {
+async fn solve_final_wrong_drops_row_and_writes_ledger(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
     let issued = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
@@ -167,7 +167,8 @@ async fn solve_final_wrong_kicks(pool: PgPool) {
     let last = svc.solve(CHAT_ID, USER_ID, &wrong).await.unwrap();
     assert_eq!(last, Outcome::WrongFinal);
 
-    // Challenge row gone, ledger row present.
+    // Challenge row gone, exactly one `captcha_failed` ledger row present,
+    // and NO `kick` row (M1 policy: failed captcha doesn't kick).
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM captcha_challenges WHERE chat_id = $1 AND user_id = $2",
     )
@@ -178,7 +179,7 @@ async fn solve_final_wrong_kicks(pool: PgPool) {
     .unwrap();
     assert_eq!(count, 0);
 
-    let actions: i64 = sqlx::query_scalar(
+    let failed: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM moderation_actions WHERE chat_id = $1 AND target_user_id = $2 AND action = 'captcha_failed'",
     )
     .bind(CHAT_ID)
@@ -186,12 +187,22 @@ async fn solve_final_wrong_kicks(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(actions, 1);
+    assert_eq!(failed, 1);
+
+    let kicks: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM moderation_actions WHERE chat_id = $1 AND target_user_id = $2 AND action = 'kick'",
+    )
+    .bind(CHAT_ID)
+    .bind(USER_ID)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kicks, 0, "M1 final-wrong path must NOT write a kick row");
 }
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires running postgres on localhost:5432"]
-async fn solve_expired_returns_expired(pool: PgPool) {
+async fn solve_expired_drops_row_and_writes_ledger(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
     let issued = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
@@ -207,6 +218,89 @@ async fn solve_expired_returns_expired(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(outcome, Outcome::Expired);
+
+    // Row deleted in the same tx as the Outcome::Expired return. Exactly one
+    // `captcha_expired` ledger row, NO `kick` (M1 policy: never kicks).
+    let challenges: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM captcha_challenges WHERE chat_id = $1 AND user_id = $2",
+    )
+    .bind(CHAT_ID)
+    .bind(USER_ID)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(challenges, 0);
+
+    let expired: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM moderation_actions WHERE chat_id = $1 AND target_user_id = $2 AND action = 'captcha_expired'",
+    )
+    .bind(CHAT_ID)
+    .bind(USER_ID)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(expired, 1);
+
+    let kicks: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM moderation_actions WHERE chat_id = $1 AND target_user_id = $2 AND action = 'kick'",
+    )
+    .bind(CHAT_ID)
+    .bind(USER_ID)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kicks, 0, "M1 expired path must NOT write a kick row");
+}
+
+// ── active_challenge_message_id ───────────────────────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires running postgres on localhost:5432"]
+async fn active_challenge_helper_distinguishes_states(pool: PgPool) {
+    seed_chat(&pool, CHAT_ID).await;
+    let svc = make_service(pool.clone());
+
+    // No row yet.
+    assert!(
+        svc.active_challenge_message_id(CHAT_ID, USER_ID)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // After issue: live row, no recorded message id yet.
+    let _ = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
+    assert_eq!(
+        svc.active_challenge_message_id(CHAT_ID, USER_ID)
+            .await
+            .unwrap(),
+        Some(None),
+    );
+
+    // After record_message_id: live row, message id present.
+    svc.record_message_id(CHAT_ID, USER_ID, 12345)
+        .await
+        .unwrap();
+    assert_eq!(
+        svc.active_challenge_message_id(CHAT_ID, USER_ID)
+            .await
+            .unwrap(),
+        Some(Some(12345)),
+    );
+
+    // Once expired, the helper reports None even though the row is still
+    // physically present (expiry job hasn't swept yet).
+    sqlx::query("UPDATE captcha_challenges SET expires_at = NOW() - INTERVAL '5 seconds' WHERE chat_id = $1")
+        .bind(CHAT_ID)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        svc.active_challenge_message_id(CHAT_ID, USER_ID)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]

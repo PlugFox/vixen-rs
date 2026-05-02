@@ -4,7 +4,9 @@
 //!
 //!   * `Update::filter_chat_member()`    — captcha issuance on join
 //!   * `Update::filter_callback_query()` — captcha digit-pad solve / refresh
-//!   * `Update::filter_message()`        — slash commands; future: spam pipeline
+//!   * `Update::filter_message()`        — slash commands first, then the
+//!     captcha message gate (delete + (re)issue captcha for unverified
+//!     non-admin users); the M2 spam pipeline will hang off the same gate.
 //!
 //! The watched-chats filter sits at the trunk so non-watched chats never reach
 //! a handler.
@@ -18,10 +20,10 @@ use teloxide::prelude::*;
 use tracing::info;
 
 use crate::api::AppState;
-use crate::services::captcha::keyboard::CALLBACK_PREFIX;
+use crate::services::captcha::keyboard::CALLBACK_PREFIX_WITH_COLON;
 use crate::telegram::commands::Command;
 use crate::telegram::handlers::{
-    captcha as captcha_handler, commands as command_handler, member_update,
+    captcha as captcha_handler, commands as command_handler, member_update, message_gate,
 };
 
 /// Set of chat IDs the bot is allowed to react to. Constructed once at startup
@@ -70,10 +72,11 @@ pub fn build_dispatcher(
         .filter(|q: CallbackQuery| {
             // Match the full `vc:` prefix (with separator) so unrelated future
             // callbacks like `vcoupon:` don't get routed into the captcha
-            // handler. `CALLBACK_PREFIX` itself is the bare scheme tag.
+            // handler. Using a `&'static str` constant avoids per-update
+            // allocation that a `format!()` would incur.
             q.data
                 .as_deref()
-                .is_some_and(|d| d.starts_with(&format!("{CALLBACK_PREFIX}:")))
+                .is_some_and(|d| d.starts_with(CALLBACK_PREFIX_WITH_COLON))
         })
         .endpoint(captcha_handler::handle);
 
@@ -84,15 +87,7 @@ pub fn build_dispatcher(
                 .filter_command::<Command>()
                 .endpoint(command_handler::dispatch),
         )
-        .endpoint(|msg: Message| async move {
-            // Non-command, non-captcha messages — full spam pipeline lands in M2.
-            tracing::trace!(
-                chat_id = msg.chat.id.0,
-                user_id = msg.from.as_ref().map(|u| u.id.0),
-                "message received (no handler in M1)"
-            );
-            Ok::<(), anyhow::Error>(())
-        });
+        .endpoint(message_gate::handle);
 
     let handler = dptree::entry()
         .branch(chat_member_branch)

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        DELETE FROM captcha_challenges\n        WHERE expires_at < NOW()\n        RETURNING chat_id, user_id, telegram_message_id\n        ",
+  "query": "\n        DELETE FROM captcha_challenges\n        WHERE id IN (\n            SELECT id FROM captcha_challenges\n            WHERE expires_at < NOW()\n            ORDER BY expires_at\n            LIMIT $1\n        )\n        RETURNING chat_id, user_id, telegram_message_id\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -28,5 +30,5 @@
       true
     ]
   },
-  "hash": "413a1dba176f5567c22d06e8b1f71f7cbb6c14f85139d038f997d038e6db065c"
+  "hash": "82211db245196a9b85bb9c7a827805b58e23e80a17ede516fdbfb0b33002560c"
 }

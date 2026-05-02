@@ -28,6 +28,12 @@ use crate::database::Redis;
 /// returning users" against "purge on schema/policy changes within a week".
 pub const VERIFIED_CACHE_TTL_SECS: u64 = 604_800;
 
+/// 6 hours. Matches the project-wide "chat info 6h" guideline (CLAUDE.md).
+/// Admins are queried via `bot.get_chat_administrators` on cache miss; six
+/// hours bounds how long a fresh promotion / demotion takes to propagate to
+/// the message-gate decision path.
+pub const ADMINS_CACHE_TTL_SECS: u64 = 21_600;
+
 #[derive(Clone)]
 pub struct CaptchaState {
     redis: Arc<Redis>,
@@ -54,13 +60,13 @@ impl MetaPayload {
     /// it as a cache miss (silent — a bad value left over from a schema change
     /// shouldn't crash the callback handler).
     pub(crate) fn from_redis_string(s: &str) -> Option<Self> {
-        let mut it = s.splitn(3, '|');
-        let owner = it.next()?.parse::<i64>().ok()?;
-        let short = it.next()?;
-        let lifetime = it.next()?.parse::<u64>().ok()?;
-        if it.next().is_some() {
+        let parts: Vec<&str> = s.split('|').collect();
+        if parts.len() != 3 {
             return None;
         }
+        let owner = parts[0].parse::<i64>().ok()?;
+        let short = parts[1];
+        let lifetime = parts[2].parse::<u64>().ok()?;
         if short.len() != 8 || !short.chars().all(|c| c.is_ascii_hexdigit()) {
             return None;
         }
@@ -206,6 +212,42 @@ impl CaptchaState {
         let v: Option<String> = conn.get(&key).await.context("GET cap:verified")?;
         Ok(v.is_some())
     }
+
+    // ── Admins cache ──────────────────────────────────────────────────────
+
+    /// Cache the chat admin list as a JSON-encoded `Vec<i64>`. Encoding
+    /// instead of a Redis SET so that "missing key" stays distinguishable
+    /// from "empty set" with a single round-trip — the message gate uses
+    /// that to decide whether to repopulate from `get_chat_administrators`.
+    pub async fn set_admins(&self, chat_id: i64, admins: &[i64]) -> Result<()> {
+        let key = admins_key(chat_id);
+        let payload = serde_json::to_string(admins).context("serialize admin list")?;
+        let mut conn = self
+            .redis
+            .pool()
+            .get()
+            .await
+            .context("redis pool acquire (set_admins)")?;
+        let _: () = conn
+            .set_ex(&key, payload, ADMINS_CACHE_TTL_SECS)
+            .await
+            .context("SETEX cap:admins")?;
+        Ok(())
+    }
+
+    /// Returns `Some(list)` on cache hit, `None` on miss (key absent or
+    /// malformed payload — both treated as "needs repopulation").
+    pub async fn get_admins(&self, chat_id: i64) -> Result<Option<Vec<i64>>> {
+        let key = admins_key(chat_id);
+        let mut conn = self
+            .redis
+            .pool()
+            .get()
+            .await
+            .context("redis pool acquire (get_admins)")?;
+        let raw: Option<String> = conn.get(&key).await.context("GET cap:admins")?;
+        Ok(raw.and_then(|s| serde_json::from_str::<Vec<i64>>(&s).ok()))
+    }
 }
 
 fn input_key(chat_id: i64, user_id: i64) -> String {
@@ -218,6 +260,10 @@ fn meta_key(chat_id: i64, message_id: i32) -> String {
 
 fn verified_key(chat_id: i64, user_id: i64) -> String {
     format!("cap:verified:{chat_id}:{user_id}")
+}
+
+fn admins_key(chat_id: i64) -> String {
+    format!("cap:admins:{chat_id}")
 }
 
 #[cfg(test)]
