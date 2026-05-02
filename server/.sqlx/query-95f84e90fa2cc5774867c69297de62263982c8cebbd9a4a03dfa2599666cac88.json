@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM captcha_challenges\n            WHERE chat_id = $1 AND user_id = $2\n            RETURNING telegram_message_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "telegram_message_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "95f84e90fa2cc5774867c69297de62263982c8cebbd9a4a03dfa2599666cac88"
+}

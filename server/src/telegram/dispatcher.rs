@@ -1,14 +1,29 @@
 //! teloxide dispatcher with the watched-chats filter.
 //!
-//! M0 only logs every received update. Captcha / spam / moderation handlers
-//! land from M1 onwards in `server/src/telegram/handlers/`.
+//! Branches:
+//!
+//!   * `Update::filter_chat_member()`    — captcha issuance on join
+//!   * `Update::filter_callback_query()` — captcha digit-pad solve / refresh
+//!   * `Update::filter_message()`        — slash commands; future: spam pipeline
+//!
+//! The watched-chats filter sits at the trunk so non-watched chats never reach
+//! a handler.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use teloxide::dispatching::{DefaultKey, Dispatcher};
+use teloxide::dptree;
 use teloxide::prelude::*;
+use teloxide::types::AllowedUpdate;
 use tracing::info;
+
+use crate::api::AppState;
+use crate::services::captcha::keyboard::CALLBACK_PREFIX;
+use crate::telegram::commands::Command;
+use crate::telegram::handlers::{
+    captcha as captcha_handler, commands as command_handler, member_update,
+};
 
 /// Set of chat IDs the bot is allowed to react to. Constructed once at startup
 /// from `Config::chats` and cloned cheaply via `Arc`.
@@ -33,24 +48,72 @@ impl WatchedChats {
     }
 }
 
-/// Build a teloxide `Dispatcher` that filters every update through `watched`
-/// and logs anything that passes. Returns the dispatcher; the caller drives it
-/// with `dispatch()` and stops it via `Dispatcher::shutdown_token()`.
-pub fn build_dispatcher(bot: Bot, watched: WatchedChats) -> Dispatcher<Bot, (), DefaultKey> {
-    let handler = Update::filter_message()
+/// Build a teloxide `Dispatcher` with the M1 handler tree. The dispatcher
+/// drives polling itself; the caller stops it via `Dispatcher::shutdown_token()`.
+pub fn build_dispatcher(
+    bot: Bot,
+    watched: WatchedChats,
+    state: AppState,
+) -> Dispatcher<Bot, anyhow::Error, DefaultKey> {
+    let chat_member_branch = Update::filter_chat_member()
+        .filter(|event: ChatMemberUpdated, watched: WatchedChats| watched.contains(event.chat.id.0))
+        .endpoint(member_update::handle);
+
+    let callback_branch = Update::filter_callback_query()
+        .filter(|q: CallbackQuery, watched: WatchedChats| {
+            q.message
+                .as_ref()
+                .map(|m| watched.contains(m.chat().id.0))
+                .unwrap_or(false)
+        })
+        .filter(|q: CallbackQuery| {
+            q.data
+                .as_deref()
+                .is_some_and(|d| d.starts_with(CALLBACK_PREFIX))
+        })
+        .endpoint(captcha_handler::handle);
+
+    let message_branch = Update::filter_message()
         .filter(|msg: Message, watched: WatchedChats| watched.contains(msg.chat.id.0))
-        .endpoint(|update: Update, msg: Message| async move {
-            info!(
-                update_id = update.id.0,
+        .branch(
+            dptree::entry()
+                .filter_command::<Command>()
+                .endpoint(command_handler::dispatch),
+        )
+        .endpoint(|msg: Message| async move {
+            // Non-command, non-captcha messages — full spam pipeline lands in M2.
+            tracing::trace!(
                 chat_id = msg.chat.id.0,
                 user_id = msg.from.as_ref().map(|u| u.id.0),
-                kind = ?std::mem::discriminant(&msg.kind),
-                "update received"
+                "message received (no handler in M1)"
             );
-            Ok::<(), ()>(())
+            Ok::<(), anyhow::Error>(())
         });
 
+    let handler = dptree::entry()
+        .branch(chat_member_branch)
+        .branch(callback_branch)
+        .branch(message_branch);
+
+    info!("telegram dispatcher: M1 handler tree ready");
+
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![watched])
+        .dependencies(dptree::deps![watched, state])
+        .default_handler(|update| async move {
+            tracing::trace!(update_id = update.id.0, "no matching handler");
+        })
+        .error_handler(teloxide::error_handlers::LoggingErrorHandler::new())
+        .enable_ctrlc_handler()
         .build()
+}
+
+/// Updates the bot subscribes to. teloxide defaults exclude `chat_member` —
+/// the captcha pipeline depends on it, so we list every variant we use.
+pub fn allowed_updates() -> Vec<AllowedUpdate> {
+    vec![
+        AllowedUpdate::Message,
+        AllowedUpdate::CallbackQuery,
+        AllowedUpdate::ChatMember,
+        AllowedUpdate::MyChatMember,
+    ]
 }

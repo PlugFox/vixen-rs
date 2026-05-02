@@ -61,7 +61,7 @@ When you add a slash command, you MUST register it both in `Command` (in `src/te
 
 ## Captcha callback data
 
-CallbackQuery `data` field carries the digit input encoded as `vc:<challenge_short>:<digit_or_action>`. Actions: `0`–`9`, `b` (backspace), `r` (refresh).
+CallbackQuery `data` field carries the digit input encoded as `vc:<challenge_short>:<op>` where `<challenge_short>` is the first 8 hex characters of the challenge UUID. Ops: `0`–`9`, `bs` (backspace), `rf` (refresh).
 
 Handler decodes, applies to `captcha_challenges.attempts_left` / current input buffer (in-memory, derived from message caption since callbacks are stateless), updates the message caption with the current input length as emoji boxes, and on full input either solves or fails.
 

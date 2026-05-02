@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO moderation_actions\n                (chat_id, target_user_id, action, actor_kind, actor_user_id, message_id, reason)\n            VALUES ($1, $2, 'verify', 'moderator', $3, $4, 'manual')\n            ON CONFLICT DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7696ceda910e4da1460e2d1766288f11e656245ee2a2704845529e2e6217db11"
+}
