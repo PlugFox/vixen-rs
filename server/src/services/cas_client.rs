@@ -73,9 +73,11 @@ impl CasClient {
         }
     }
 
-    /// Tier order: Moka → Redis → HTTP. On any failure (network, Redis,
-    /// timeout) returns `Verdict::Clean` — falsely flagging is worse than
-    /// missing a spammer.
+    /// Tier order: Moka → Redis → HTTP. On any HTTP failure (network, Redis,
+    /// timeout, non-2xx, body parse) returns `Verdict::Clean` — falsely
+    /// flagging is worse than missing a spammer — and **does not** cache the
+    /// fail-open value, so a short CAS outage doesn't poison the cache for
+    /// 24h. A genuine clean/flagged verdict from the upstream IS cached.
     #[instrument(skip(self), fields(user_id))]
     pub async fn lookup(&self, user_id: i64) -> Verdict {
         if let Some(v) = self.moka.get(&user_id).await {
@@ -87,9 +89,13 @@ impl CasClient {
             self.moka.insert(user_id, v).await;
             return v;
         }
-        let verdict = self.http_check(user_id).await;
-        self.write_through(user_id, verdict).await;
-        verdict
+        match self.http_check(user_id).await {
+            Some(verdict) => {
+                self.write_through(user_id, verdict).await;
+                verdict
+            }
+            None => Verdict::Clean,
+        }
     }
 
     async fn redis_get(&self, user_id: i64) -> Option<Verdict> {
@@ -132,31 +138,35 @@ impl CasClient {
         }
     }
 
-    async fn http_check(&self, user_id: i64) -> Verdict {
+    /// `Some(verdict)` means we got a definitive answer from upstream and the
+    /// caller should cache it. `None` means we fail-open: caller returns
+    /// `Verdict::Clean` to the pipeline but does NOT cache it (so the next
+    /// call retries the network instead of being stuck on a stale Clean).
+    async fn http_check(&self, user_id: i64) -> Option<Verdict> {
         let url = format!("{}/check?user_id={}", self.base_url, user_id);
         let resp = match self.http.get(&url).send().await {
             Ok(r) => r,
             Err(e) => {
-                warn!(error = %e, "CAS HTTP failed; fail-open Clean");
-                return Verdict::Clean;
+                warn!(error = %e, "CAS HTTP failed; fail-open Clean (not cached)");
+                return None;
             }
         };
         if !resp.status().is_success() {
-            warn!(status = %resp.status(), "CAS non-2xx; fail-open Clean");
-            return Verdict::Clean;
+            warn!(status = %resp.status(), "CAS non-2xx; fail-open Clean (not cached)");
+            return None;
         }
         let body: CasResponse = match resp.json().await {
             Ok(b) => b,
             Err(e) => {
-                warn!(error = %e, "CAS body parse failed; fail-open Clean");
-                return Verdict::Clean;
+                warn!(error = %e, "CAS body parse failed; fail-open Clean (not cached)");
+                return None;
             }
         };
-        if body.ok {
+        Some(if body.ok {
             Verdict::Flagged
         } else {
             Verdict::Clean
-        }
+        })
     }
 }
 

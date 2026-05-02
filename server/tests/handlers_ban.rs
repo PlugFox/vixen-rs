@@ -153,13 +153,19 @@ async fn ban_by_non_moderator_is_rejected(pool: PgPool) {
     seed_chat(&pool, chat_id).await;
     let redis = fresh_redis(REDIS_URL).await;
 
-    // No `chat_moderators` row, no Redis admin cache → handler short-circuits
-    // on permission denial WITHOUT a live `getChatAdministrators` call:
-    // `is_moderator_or_admin` returns `false` because the live API call into
-    // MockBot's mock server resolves cleanly to an empty admin list (the
-    // `getChatAdministrators` route isn't mocked, so the request 404s and the
-    // helper returns `false`). Either way: no ban.
+    // No `chat_moderators` row. Pre-seed an EMPTY admin cache so the handler
+    // short-circuits at the Redis check and never hits the unmocked
+    // `getChatAdministrators` route — that route returns 404 from
+    // `teloxide_tests` 0.2's actix server, and reqwest's behaviour against
+    // the unmocked endpoint is non-deterministic under load (observed flake
+    // in CI). Pre-seeding the cache makes this branch deterministic.
     const STRANGER_ID: u64 = 5555;
+    let captcha_state = vixen_server::services::captcha::CaptchaState::new(Arc::clone(&redis));
+    captcha_state
+        .set_admins(chat_id, &[])
+        .await
+        .expect("seed empty admin cache");
+
     let ban_cmd = cmd_message(chat_id, STRANGER_ID, &format!("/ban {TARGET_ID}"));
 
     let mock = MockBot::new(ban_cmd, handler());

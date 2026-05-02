@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use teloxide::prelude::*;
-use teloxide::types::{ChatId, UserId};
+use teloxide::types::{ChatId, ChatMemberKind};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
@@ -50,9 +50,12 @@ async fn verify(bot: Bot, msg: Message, state: AppState, arg: &str) -> Result<()
         }
     };
 
-    if !is_moderator(&bot, msg.chat.id, actor.id).await {
+    if !is_moderator_or_admin(&bot, &state, msg.chat.id, actor).await {
         let _ = bot
-            .send_message(msg.chat.id, "Only chat administrators can run /verify.")
+            .send_message(
+                msg.chat.id,
+                "Only chat moderators or admins can run /verify.",
+            )
             .await;
         return Ok(());
     }
@@ -104,24 +107,13 @@ fn resolve_target(msg: &Message, arg: &str) -> Option<i64> {
     Some(reply.from.as_ref()?.id.0 as i64)
 }
 
-/// True if `user` is a chat administrator (creator or admin) per Telegram.
-/// On API failure (rate limit, permission revoked) returns `false` and logs
-/// the error — `/verify` will deny the call rather than silently elevate.
-/// `/ban` and `/unban` use [`is_moderator_or_admin`] which adds the
-/// `chat_moderators` table check on top.
-async fn is_moderator(bot: &Bot, chat_id: ChatId, user_id: UserId) -> bool {
-    match bot.get_chat_administrators(chat_id).await {
-        Ok(list) => list.iter().any(|a| a.user.id == user_id),
-        Err(e) => {
-            warn!(error = %e, "get_chat_administrators failed");
-            false
-        }
-    }
-}
-
-/// `/ban` and `/unban` permission gate: moderator (DB row in
+/// Permission gate shared by `/verify`, `/ban`, `/unban`: moderator (DB row in
 /// `chat_moderators`, Moka 5min cache) **OR** chat admin (existing M1 admin
 /// cache, 6h Redis TTL, falls back to a live `getChatAdministrators`).
+///
+/// On every cache repopulation we filter out `Banned` / `Left` admins — the
+/// same rule message_gate uses — so a stale ex-admin id can't sneak into the
+/// cache via this path.
 async fn is_moderator_or_admin(
     bot: &Bot,
     state: &AppState,
@@ -145,7 +137,11 @@ async fn is_moderator_or_admin(
     }
     match bot.get_chat_administrators(chat_id).await {
         Ok(admins) => {
-            let ids: Vec<i64> = admins.iter().map(|a| a.user.id.0 as i64).collect();
+            let ids: Vec<i64> = admins
+                .iter()
+                .filter(|a| !matches!(a.kind, ChatMemberKind::Banned(_) | ChatMemberKind::Left))
+                .map(|a| a.user.id.0 as i64)
+                .collect();
             if let Err(e) = state.captcha_state.set_admins(chat_id.0, &ids).await {
                 warn!(error = ?e, "redis set_admins failed");
             }

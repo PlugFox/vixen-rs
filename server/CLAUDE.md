@@ -41,7 +41,7 @@ After **any** user-visible change, append to root [`CHANGELOG.md`](../CHANGELOG.
 ## Key Conventions
 
 - All SQL queries are SQLx compile-time checked. Run `cargo sqlx prepare -- --all-targets` after schema changes; commit `.sqlx/`.
-- **Telegram IDs are always `i64` in code and `BIGINT` in SQL.** Never narrow to `i32`. Negative supergroup IDs (`-100…`) require signed 64-bit.
+- **Telegram chat IDs and user IDs are always `i64` in code and `BIGINT` in SQL.** Never narrow to `i32`. Negative supergroup IDs (`-100…`) require signed 64-bit. Message IDs (`teloxide::types::MessageId`) are `i32` / `INTEGER` — that follows teloxide's type and there's no overflow concern; columns `moderation_actions.message_id` and `captcha_challenges.telegram_message_id` are `INTEGER`.
 - **Transactions are mandatory for multi-step writes.** Captcha solve = DELETE challenge + INSERT verified_user in one tx. Per-chat config update = `SELECT ... FOR UPDATE` + `UPDATE`.
 - **Cache TG-API calls only with a sensible TTL** (chat info 6h, CAS verdict 1h). Never cache user state — read fresh.
 - **Document REST endpoints with `#[utoipa::path(...)]`.** Telegram handlers do NOT need utoipa — they aren't HTTP.

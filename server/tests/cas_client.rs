@@ -78,7 +78,7 @@ async fn clean_lookup_is_cached_too() {
 
 #[tokio::test]
 #[ignore = "requires redis://localhost:6379"]
-async fn http_5xx_is_fail_open() {
+async fn http_5xx_is_fail_open_and_not_cached() {
     let redis = fresh_redis().await;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -87,8 +87,18 @@ async fn http_5xx_is_fail_open() {
         .mount(&server)
         .await;
 
-    let client = CasClient::new(redis, server.uri());
+    let client = CasClient::new(redis.clone(), server.uri());
     assert_eq!(client.lookup(99).await, Verdict::Clean);
+    assert_eq!(client.lookup(99).await, Verdict::Clean);
+
+    // A short CAS outage must not poison Moka or Redis with a stale Clean,
+    // otherwise we'd be unable to ban anyone the upstream subsequently flags
+    // for up to 24h.
+    let calls = server.received_requests().await.unwrap();
+    assert_eq!(calls.len(), 2, "fail-open should retry network, not cache");
+    let mut conn = redis.pool().get().await.unwrap();
+    let raw: Option<String> = conn.get("cas:99").await.unwrap();
+    assert!(raw.is_none(), "fail-open Clean must not land in Redis");
 }
 
 #[tokio::test]

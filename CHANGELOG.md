@@ -11,6 +11,28 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Fixed
+
+- moderation ledger no longer rolls back the row outside of a transaction after
+  a fatal Telegram failure. `ModerationService::apply` now performs the INSERT,
+  the bot call, and the COMMIT inside one tx; a fatal bot error rolls back the
+  whole tx atomically, so a parallel `apply` for the same `(chat, user, action,
+  message_id)` cannot observe the row before it is durable and can no longer
+  receive a misleading `AlreadyApplied` for an action that ultimately did not
+  stick. (server)
+- CAS fail-open verdicts (network error, non-2xx, body parse failure) are no
+  longer cached. Previously a brief CAS outage poisoned Moka for 1 h and
+  Redis for 24 h with stale `Clean` results; now `lookup` retries the upstream
+  on the next call. Genuine `Clean` / `Flagged` from the upstream are still
+  cached. (server)
+- `/verify` permission gate widened to `chat_moderators` OR chat admin,
+  matching `/ban` and `/unban`. Previously only chat admins could run it,
+  which was an undocumented asymmetry with the rest of the moderator
+  surface. (server)
+- chat-admin Redis cache write in `/ban` / `/unban` / `/verify` now filters
+  `Banned` / `Left` admins, matching the `message_gate` filter. Stale
+  ex-admin ids can no longer leak into the cache via the command path. (server)
+
 ### Changed
 
 - captcha message captions redesigned for clarity. The progress mask now shows

@@ -22,7 +22,8 @@ pub const NAME: &str = "spam_cleanup";
 pub const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub async fn run(_bot: Bot, state: AppState, shutdown: CancellationToken) -> Result<()> {
-    let retention_days = i64::from(state.config.spam_retention_days);
+    let retention_days = i32::try_from(state.config.spam_retention_days)
+        .context("spam_retention_days exceeds i32")?;
     let mut interval = tokio::time::interval(INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     info!(
@@ -48,7 +49,7 @@ pub async fn run(_bot: Bot, state: AppState, shutdown: CancellationToken) -> Res
 }
 
 #[instrument(skip(pool), fields(job = NAME, retention_days))]
-async fn do_one_pass(pool: &PgPool, retention_days: i64) -> Result<()> {
+async fn do_one_pass(pool: &PgPool, retention_days: i32) -> Result<()> {
     let pruned = prune_expired(pool, retention_days).await?;
     if pruned > 0 {
         info!(pruned, "spam_messages rows pruned");
@@ -58,13 +59,13 @@ async fn do_one_pass(pool: &PgPool, retention_days: i64) -> Result<()> {
 
 /// Delete `spam_messages` rows whose `last_seen` is older than `now -
 /// retention_days days`. Returns the count.
-pub async fn prune_expired(pool: &PgPool, retention_days: i64) -> Result<u64> {
+pub async fn prune_expired(pool: &PgPool, retention_days: i32) -> Result<u64> {
     let res = sqlx::query!(
         r#"
         DELETE FROM spam_messages
         WHERE last_seen < NOW() - make_interval(days => $1::int)
         "#,
-        retention_days as i32,
+        retention_days,
     )
     .execute(pool)
     .await
