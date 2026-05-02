@@ -1,6 +1,6 @@
 [package]
 name = "vixen-server"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -127,7 +127,6 @@ image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
 ] }
-webp = "0.3"
 ab_glyph = "0.2"
 plotters = { version = "0.3", default-features = false, features = [
     "bitmap_backend",

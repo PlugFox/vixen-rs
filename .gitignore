@@ -82,8 +82,9 @@ pids
 .parcel-cache
 
 # temp and cache directory
-.temp
-.cache
+.temp/
+.cache/
+.old/
 
 # Vite logs files
 vite.config.js.timestamp-*

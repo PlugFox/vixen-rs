@@ -23,7 +23,9 @@ use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
 use crate::services::captcha::Outcome;
-use crate::services::captcha::keyboard::{OP_BACKSPACE, OP_REFRESH, parse_callback, short_id};
+use crate::services::captcha::keyboard::{
+    OP_BACKSPACE, OP_REFRESH, digit_pad_from_short, parse_callback, short_id,
+};
 
 const MASK_FILLED: char = '●';
 const MASK_EMPTY: char = '○';
@@ -97,10 +99,29 @@ pub async fn handle(bot: Bot, q: CallbackQuery, state: AppState) -> Result<()> {
 
     match parsed.op.as_str() {
         OP_REFRESH => refresh(&bot, &state, chat_id, message_id, owner_id).await,
-        OP_BACKSPACE => backspace(&bot, &state, chat_id, message_id, owner_id, lifetime).await,
+        OP_BACKSPACE => {
+            backspace(
+                &bot,
+                &state,
+                chat_id,
+                message_id,
+                owner_id,
+                lifetime,
+                &parsed.short,
+            )
+            .await
+        }
         digit if digit.len() == 1 && digit.chars().next().unwrap().is_ascii_digit() => {
             digit_pressed(
-                &bot, &state, chat_id, presser_id, message_id, owner_id, lifetime, digit,
+                &bot,
+                &state,
+                chat_id,
+                presser_id,
+                message_id,
+                owner_id,
+                lifetime,
+                digit,
+                &parsed.short,
             )
             .await
         }
@@ -118,6 +139,7 @@ async fn digit_pressed(
     owner_id: i64,
     lifetime_secs: u64,
     digit: &str,
+    short: &str,
 ) -> Result<()> {
     let mut input = match state.captcha_state.get_input(chat_id.0, owner_id).await {
         Ok(s) => s,
@@ -144,6 +166,7 @@ async fn digit_pressed(
         let _ = bot
             .edit_message_caption(chat_id, message_id)
             .caption(caption_for(&input))
+            .reply_markup(digit_pad_from_short(short))
             .await
             .inspect_err(|e| warn!(error = %e, "edit_message_caption failed"));
         return Ok(());
@@ -175,6 +198,7 @@ async fn digit_pressed(
                     left,
                     caption_for("")
                 ))
+                .reply_markup(digit_pad_from_short(short))
                 .await;
         }
         Outcome::WrongFinal | Outcome::Expired => {
@@ -192,6 +216,7 @@ async fn digit_pressed(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn backspace(
     bot: &Bot,
     state: &AppState,
@@ -199,6 +224,7 @@ async fn backspace(
     message_id: teloxide::types::MessageId,
     owner_id: i64,
     lifetime_secs: u64,
+    short: &str,
 ) -> Result<()> {
     let mut input = match state.captcha_state.get_input(chat_id.0, owner_id).await {
         Ok(s) => s,
@@ -218,6 +244,7 @@ async fn backspace(
     let _ = bot
         .edit_message_caption(chat_id, message_id)
         .caption(caption_for(&input))
+        .reply_markup(digit_pad_from_short(short))
         .await;
     Ok(())
 }
