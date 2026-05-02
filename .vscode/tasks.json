@@ -1,0 +1,681 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    /* ───── Server (Rust) ───── */
+    {
+      "label": "server:format:check",
+      "detail": "cargo fmt --all -- --check",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["fmt", "--all", "--", "--check"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "server:format:fix",
+      "detail": "cargo fmt --all",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["fmt", "--all"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "server:lint:clippy",
+      "detail": "cargo clippy --all-targets --all-features -- -D warnings",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "SQLX_OFFLINE": "true" }
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "server:lint:fix",
+      "detail": "Auto-fix Clippy warnings (--allow-dirty)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--all-targets",
+        "--all-features",
+        "--fix",
+        "--allow-dirty",
+        "--allow-staged"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "SQLX_OFFLINE": "true" }
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "server:check",
+      "detail": "cargo check --all-targets",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["check", "--all-targets"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "SQLX_OFFLINE": "true" }
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "server:test",
+      "detail": "cargo test --workspace --all-features",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "--workspace", "--all-features"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "RUST_BACKTRACE": "1" }
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "server:test:ignored",
+      "detail": "Run #[ignore]'d tests (need live Postgres + Redis)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "test",
+        "--workspace",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--include-ignored"
+      ],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "server:build:debug",
+      "detail": "cargo build",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "server:build:release",
+      "detail": "cargo build --release",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "--release"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "server:run",
+      "detail": "cargo run --bin server (HTTP API + bot poller + jobs)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "--bin", "server"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "RUST_BACKTRACE": "1", "RUST_LOG": "info,vixen=debug" }
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": false
+      },
+      "isBackground": true,
+      "group": "none"
+    },
+    {
+      "label": "server:run:release",
+      "detail": "cargo run --release --bin server",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "--release", "--bin", "server"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "RUST_BACKTRACE": "1" }
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": false
+      },
+      "isBackground": true,
+      "group": "none"
+    },
+    {
+      "label": "server:doc:open",
+      "detail": "cargo doc --no-deps --open",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["doc", "--no-deps", "--open"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "server:clean",
+      "detail": "cargo clean (purge target/)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["clean"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+
+    /* ───── Server: TOML (taplo) ─────
+     * Install once with: cargo install taplo-cli --locked
+     */
+    {
+      "label": "server:toml:format:check",
+      "detail": "taplo format --check",
+      "type": "shell",
+      "command": "taplo",
+      "args": ["format", "--check"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "server:toml:format:fix",
+      "detail": "taplo format",
+      "type": "shell",
+      "command": "taplo",
+      "args": ["format"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+
+    /* ───── Server: SQLx ─────
+     * DATABASE_URL matches docker/docker-compose.yml defaults.
+     * Override locally via `.env` or by exporting DATABASE_URL in your shell.
+     */
+    {
+      "label": "server:db:migrate",
+      "detail": "sqlx migrate run",
+      "type": "shell",
+      "command": "sqlx",
+      "args": ["migrate", "run"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": {
+          "DATABASE_URL": "postgres://vixen:vixen_dev_password@localhost:5432/vixen"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "group": "none"
+    },
+    {
+      "label": "server:db:revert",
+      "detail": "sqlx migrate revert (one step back)",
+      "type": "shell",
+      "command": "sqlx",
+      "args": ["migrate", "revert"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": {
+          "DATABASE_URL": "postgres://vixen:vixen_dev_password@localhost:5432/vixen"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "group": "none"
+    },
+    {
+      "label": "server:db:reset",
+      "detail": "sqlx database reset -y (drop + recreate + migrate)",
+      "type": "shell",
+      "command": "sqlx",
+      "args": ["database", "reset", "-y"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": {
+          "DATABASE_URL": "postgres://vixen:vixen_dev_password@localhost:5432/vixen"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "group": "none"
+    },
+    {
+      "label": "server:db:add",
+      "detail": "sqlx migrate add -r <name> (reversible up/down pair)",
+      "type": "shell",
+      "command": "sqlx",
+      "args": ["migrate", "add", "-r", "${input:migrationName}"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "group": "none"
+    },
+    {
+      "label": "server:db:prepare",
+      "detail": "cargo sqlx prepare --workspace -- --all-targets (refresh .sqlx/)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["sqlx", "prepare", "--workspace", "--", "--all-targets"],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": {
+          "DATABASE_URL": "postgres://vixen:vixen_dev_password@localhost:5432/vixen"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "server:db:prepare:check",
+      "detail": "cargo sqlx prepare --check (CI parity, SQLX_OFFLINE)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "sqlx",
+        "prepare",
+        "--check",
+        "--workspace",
+        "--",
+        "--all-targets"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "env": { "SQLX_OFFLINE": "true" }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+
+    /* ───── Server: audit ─────
+     * Install once with: cargo install cargo-audit --locked
+     */
+    {
+      "label": "server:audit",
+      "detail": "cargo audit (RustSec advisory DB)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["audit"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+
+    /* ───── Server: aggregates ───── */
+    {
+      "label": "server:fix:all",
+      "detail": "Fix formatting + clippy auto-fix + TOML format",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "server:format:fix",
+        "server:toml:format:fix",
+        "server:lint:fix"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true,
+        "clear": true
+      },
+      "group": "none"
+    },
+    {
+      "label": "server:ci:check",
+      "detail": "Local CI parity: fmt + clippy + test + sqlx prepare --check (matches .github/workflows/server-ci.yml)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "server:format:check",
+        "server:lint:clippy",
+        "server:test",
+        "server:db:prepare:check"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true,
+        "clear": true
+      },
+      "group": { "kind": "test", "isDefault": false }
+    },
+
+    /* ───── Website (bun + SolidJS) ───── */
+    {
+      "label": "website:install",
+      "detail": "bun install",
+      "type": "shell",
+      "command": "bun",
+      "args": ["install"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "website:dev",
+      "detail": "bun run dev (http://localhost:3000)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "group": "none"
+    },
+    {
+      "label": "website:build",
+      "detail": "bun run build (production bundle)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "build"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "website:check",
+      "detail": "bun run check (Biome lint + format check)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "check"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "website:check:fix",
+      "detail": "bun run check:fix (Biome auto-fix)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "check:fix"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "website:lint",
+      "detail": "bun run lint",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "lint"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "website:format",
+      "detail": "bun run format (Biome formatter)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "format"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "website:typecheck",
+      "detail": "bun run typecheck (tsc --noEmit)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "typecheck"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "website:clean",
+      "detail": "Remove dist + Vite cache",
+      "type": "shell",
+      "command": "rm",
+      "args": ["-rf", "dist", "node_modules/.vite", ".vite"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "website:ci:check",
+      "detail": "Local CI parity for website: check + typecheck + build",
+      "dependsOrder": "sequence",
+      "dependsOn": ["website:check", "website:typecheck", "website:build"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true,
+        "clear": true
+      },
+      "group": "test"
+    },
+
+    /* ───── Docker Compose (Postgres + Redis) ───── */
+    {
+      "label": "docker:up",
+      "detail": "docker compose up -d (Postgres + Redis)",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "up", "-d"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "group": "none"
+    },
+    {
+      "label": "docker:down",
+      "detail": "docker compose down (preserves volumes)",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "down"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "group": "none"
+    },
+    {
+      "label": "docker:restart",
+      "detail": "docker compose restart",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "restart"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "group": "none"
+    },
+    {
+      "label": "docker:logs",
+      "detail": "docker compose logs -f (tail all services)",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "logs", "-f"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "group": "none"
+    },
+    {
+      "label": "docker:ps",
+      "detail": "docker compose ps",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "ps"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "docker:psql",
+      "detail": "Open psql shell in Postgres container",
+      "type": "shell",
+      "command": "docker",
+      "args": [
+        "compose",
+        "exec",
+        "postgres",
+        "psql",
+        "-U",
+        "vixen",
+        "-d",
+        "vixen"
+      ],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "group": "none"
+    },
+    {
+      "label": "docker:redis-cli",
+      "detail": "Open redis-cli in Redis container",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "exec", "redis", "redis-cli"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "group": "none"
+    },
+    {
+      "label": "docker:wipe",
+      "detail": "docker compose down -v (DESTROYS volumes — confirm in terminal)",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "down", "-v"],
+      "options": { "cwd": "${workspaceFolder}/docker" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "focus": true },
+      "group": "none"
+    },
+
+    /* ───── Cross-cutting ───── */
+    {
+      "label": "ci:check:all",
+      "detail": "Run server + website CI parity in sequence",
+      "dependsOrder": "sequence",
+      "dependsOn": ["server:ci:check", "website:ci:check"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true,
+        "clear": true
+      },
+      "group": { "kind": "test", "isDefault": false }
+    },
+    {
+      "label": "dev:up",
+      "detail": "Start Postgres+Redis and apply migrations",
+      "dependsOrder": "sequence",
+      "dependsOn": ["docker:up", "server:db:migrate"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true,
+        "clear": true
+      },
+      "group": "none"
+    },
+
+    /* ───── Version bump ───── */
+    {
+      "label": "server:version:bump",
+      "detail": "cargo set-version --bump <type> (install: cargo install cargo-edit)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["set-version", "--bump", "${input:bumpType}"],
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "website:version:bump",
+      "detail": "npm version <type> --no-git-tag-version",
+      "type": "shell",
+      "command": "npm",
+      "args": ["version", "${input:bumpType}", "--no-git-tag-version"],
+      "options": { "cwd": "${workspaceFolder}/website" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": "none"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "bumpType",
+      "type": "pickString",
+      "description": "Select version bump type",
+      "options": ["patch", "minor", "major"],
+      "default": "patch"
+    },
+    {
+      "id": "migrationName",
+      "type": "promptString",
+      "description": "Migration name (snake_case, e.g. add_chat_settings_index)"
+    }
+  ]
+}
