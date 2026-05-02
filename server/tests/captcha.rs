@@ -51,7 +51,7 @@ async fn issue_writes_row_and_returns_image(pool: PgPool) {
     let expected_solution = solution_for(issued.challenge_id);
     assert_eq!(expected_solution.len(), 4);
     assert!(!issued.image_webp.is_empty());
-    assert!(issued.image_webp.len() <= 30_000);
+    assert!(issued.image_webp.len() <= 150_000);
     assert_eq!(issued.attempts_left, 5);
 
     let row = sqlx::query!(

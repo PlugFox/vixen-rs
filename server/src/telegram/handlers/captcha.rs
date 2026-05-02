@@ -23,10 +23,11 @@ use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
 use crate::services::captcha::Outcome;
-use crate::services::captcha::keyboard::{OP_BACKSPACE, OP_REFRESH, parse_callback, short_id};
+use crate::services::captcha::caption::{caption_progress, caption_wrong};
+use crate::services::captcha::keyboard::{
+    OP_BACKSPACE, OP_REFRESH, digit_pad_from_short, parse_callback, short_id,
+};
 
-const MASK_FILLED: char = '●';
-const MASK_EMPTY: char = '○';
 const SOLUTION_LEN: usize = 4;
 
 #[instrument(
@@ -97,10 +98,29 @@ pub async fn handle(bot: Bot, q: CallbackQuery, state: AppState) -> Result<()> {
 
     match parsed.op.as_str() {
         OP_REFRESH => refresh(&bot, &state, chat_id, message_id, owner_id).await,
-        OP_BACKSPACE => backspace(&bot, &state, chat_id, message_id, owner_id, lifetime).await,
+        OP_BACKSPACE => {
+            backspace(
+                &bot,
+                &state,
+                chat_id,
+                message_id,
+                owner_id,
+                lifetime,
+                &parsed.short,
+            )
+            .await
+        }
         digit if digit.len() == 1 && digit.chars().next().unwrap().is_ascii_digit() => {
             digit_pressed(
-                &bot, &state, chat_id, presser_id, message_id, owner_id, lifetime, digit,
+                &bot,
+                &state,
+                chat_id,
+                presser_id,
+                message_id,
+                owner_id,
+                lifetime,
+                digit,
+                &parsed.short,
             )
             .await
         }
@@ -118,6 +138,7 @@ async fn digit_pressed(
     owner_id: i64,
     lifetime_secs: u64,
     digit: &str,
+    short: &str,
 ) -> Result<()> {
     let mut input = match state.captcha_state.get_input(chat_id.0, owner_id).await {
         Ok(s) => s,
@@ -143,7 +164,8 @@ async fn digit_pressed(
         }
         let _ = bot
             .edit_message_caption(chat_id, message_id)
-            .caption(caption_for(&input))
+            .caption(caption_progress(&input))
+            .reply_markup(digit_pad_from_short(short))
             .await
             .inspect_err(|e| warn!(error = %e, "edit_message_caption failed"));
         return Ok(());
@@ -170,11 +192,8 @@ async fn digit_pressed(
             }
             let _ = bot
                 .edit_message_caption(chat_id, message_id)
-                .caption(format!(
-                    "Wrong, try again. Attempts left: {}\n{}",
-                    left,
-                    caption_for("")
-                ))
+                .caption(caption_wrong(left))
+                .reply_markup(digit_pad_from_short(short))
                 .await;
         }
         Outcome::WrongFinal | Outcome::Expired => {
@@ -192,6 +211,7 @@ async fn digit_pressed(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn backspace(
     bot: &Bot,
     state: &AppState,
@@ -199,6 +219,7 @@ async fn backspace(
     message_id: teloxide::types::MessageId,
     owner_id: i64,
     lifetime_secs: u64,
+    short: &str,
 ) -> Result<()> {
     let mut input = match state.captcha_state.get_input(chat_id.0, owner_id).await {
         Ok(s) => s,
@@ -217,7 +238,8 @@ async fn backspace(
     }
     let _ = bot
         .edit_message_caption(chat_id, message_id)
-        .caption(caption_for(&input))
+        .caption(caption_progress(&input))
+        .reply_markup(digit_pad_from_short(short))
         .await;
     Ok(())
 }
@@ -252,7 +274,7 @@ async fn refresh(
     };
     let media = InputMedia::Photo(
         InputMediaPhoto::new(InputFile::memory(issued.image_webp).file_name("captcha.webp"))
-            .caption(caption_for("")),
+            .caption(caption_progress("")),
     );
     let _ = bot
         .edit_message_media(chat_id, message_id, media)
@@ -328,33 +350,4 @@ async fn on_failed(
         user_id = user_id.0 as i64,
         "captcha failed; row cleared, user retains membership"
     );
-}
-
-fn caption_for(input: &str) -> String {
-    let n = input.chars().count();
-    let mask: String = (0..SOLUTION_LEN)
-        .map(|i| if i < n { MASK_FILLED } else { MASK_EMPTY })
-        .collect();
-    format!("Solve the captcha: {mask}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn caption_renders_progress_mask() {
-        assert_eq!(
-            caption_for(""),
-            format!("Solve the captcha: {MASK_EMPTY}{MASK_EMPTY}{MASK_EMPTY}{MASK_EMPTY}")
-        );
-        assert_eq!(
-            caption_for("12"),
-            format!("Solve the captcha: {MASK_FILLED}{MASK_FILLED}{MASK_EMPTY}{MASK_EMPTY}")
-        );
-        assert_eq!(
-            caption_for("1234"),
-            format!("Solve the captcha: {MASK_FILLED}{MASK_FILLED}{MASK_FILLED}{MASK_FILLED}")
-        );
-    }
 }

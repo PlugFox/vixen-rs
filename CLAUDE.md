@@ -66,7 +66,7 @@ cd website && bun run typecheck           # tsc --noEmit
 ## Critical Rules
 
 - Before substantial work, read [AGENTS.md](AGENTS.md), then the per-component CLAUDE.md ([server/CLAUDE.md](server/CLAUDE.md) or [website/CLAUDE.md](website/CLAUDE.md)).
-- **Telegram IDs are `i64` / `BIGINT`.** Never `i32` (overflows on supergroup IDs `-100…`), never `u64`. This is non-negotiable across the whole stack.
+- **Telegram chat IDs and user IDs are `i64` / `BIGINT`.** Never `i32` (overflows on supergroup IDs `-100…`), never `u64`. This is non-negotiable across the whole stack. Telegram message IDs (`teloxide::types::MessageId`) are the exception — they fit in `i32` / `INTEGER` per teloxide's type, so the columns `moderation_actions.message_id` and `captcha_challenges.telegram_message_id` are `INTEGER`.
 - **Captcha assets in `server/assets/captcha/` are immutable.** Do not edit existing files. To change a captcha look, add a new asset file and bump the version selector. Existing pending challenges reference asset paths verbatim — overwriting breaks deterministic re-rendering tests.
 - **Never log bot tokens, raw `initData`, or user PII to public logs.** Use the `RedactedToken` newtype from `server/src/utils/redact.rs` for any `tracing` call that might surface a token. Phone numbers, full names, message bodies are opt-in only.
 - **Telegram WebApp `initData` is HMAC-validated server-side on every request.** HMAC-SHA256 with `key = HMAC_SHA256("WebAppData", bot_token)` per Telegram spec; reject `auth_date` older than 24h. The website never trusts `Telegram.WebApp.initDataUnsafe` — it always submits the raw signed `initData` string.

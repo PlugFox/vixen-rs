@@ -1,0 +1,12 @@
+# Dedup corpus. Each sample is fed through the pipeline twice. The second
+# pass must return Verdict::Ban (xxh3-64 hash already present in
+# spam_messages from the first pass's n-gram-triggered record). Entries
+# must contain at least one curated phrase so the first pass triggers a
+# Delete + record; otherwise dedup never primes.
+
+must_ban_after_first:
+  - "Заработок в интернете на дому без вложений, пишите в лс для деталей и инструкций"
+  - "Make money work from home with our partners wanted programme — click here"
+  - "Курсы похудения с гарантией результата и марафоном похудения сейчас"
+  - "Криптовалюта майнинг и биткоин — присоединяйся к команде уже сегодня"
+  - "Лучшая цена на квартиру в рассрочку без первоначального взноса в москве"

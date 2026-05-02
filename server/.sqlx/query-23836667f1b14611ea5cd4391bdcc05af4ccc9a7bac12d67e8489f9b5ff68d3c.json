@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT action\n                FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2 AND action IN ('ban', 'unban')\n                ORDER BY created_at DESC\n                LIMIT 1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "action",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "23836667f1b14611ea5cd4391bdcc05af4ccc9a7bac12d67e8489f9b5ff68d3c"
+}

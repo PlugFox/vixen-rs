@@ -11,6 +11,7 @@ use teloxide::types::{ChatMemberKind, ChatMemberUpdated, InputFile};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
+use crate::services::captcha::caption::caption_initial;
 use crate::services::captcha::short_id;
 
 #[instrument(
@@ -62,17 +63,14 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
         }
     };
 
-    let caption = format!(
-        "{} please solve the captcha to start chatting.\nAttempts left: {}",
-        mention(&event.new_chat_member.user),
-        issued.attempts_left,
-    );
+    let caption = caption_initial(&mention(&event.new_chat_member.user), issued.attempts_left);
 
     let photo = InputFile::memory(issued.image_webp).file_name("captcha.webp");
     let send_result = bot
         .send_photo(chat_id, photo)
         .caption(caption)
         .reply_markup(issued.keyboard)
+        .protect_content(true)
         .await;
 
     match send_result {

@@ -32,8 +32,17 @@ pub const OP_REFRESH: &str = "rf";
 
 /// Build the digit-pad keyboard for the given challenge.
 pub fn digit_pad(challenge_id: Uuid) -> InlineKeyboardMarkup {
-    let short = short_id(challenge_id);
-    let cb = |op: &str| InlineKeyboardButton::callback(label_for(op), data_for(&short, op));
+    digit_pad_from_short(&short_id(challenge_id))
+}
+
+/// Build the digit-pad keyboard from an already-computed short id. The
+/// callback handler keeps only the short in Redis (`cap:meta:{chat}:{msg}`),
+/// so it can rebuild the same keyboard on `edit_message_caption` without
+/// having to round-trip the full UUID. `editMessageCaption` drops the
+/// existing `reply_markup` unless one is passed back explicitly, so every
+/// caption edit re-attaches this keyboard.
+pub fn digit_pad_from_short(short: &str) -> InlineKeyboardMarkup {
+    let cb = |op: &str| InlineKeyboardButton::callback(label_for(op), data_for(short, op));
     InlineKeyboardMarkup::new(vec![
         vec![cb("1"), cb("2"), cb("3")],
         vec![cb("4"), cb("5"), cb("6")],

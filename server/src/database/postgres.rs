@@ -48,6 +48,13 @@ impl Database {
         &self.pool
     }
 
+    /// Wrap an externally-owned pool. Used by `#[sqlx::test]` integration tests
+    /// that need an `AppState` but get their `PgPool` from sqlx's per-test DB
+    /// fixture rather than from `Self::connect`.
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     /// Cheap liveness probe used by `/health`. Acquires a connection and runs
     /// `SELECT 1`. Subject to the pool's `acquire_timeout`.
     pub async fn health_check(&self) -> Result<(), sqlx::Error> {
@@ -57,8 +64,10 @@ impl Database {
         Ok(())
     }
 
-    /// Apply pending migrations from `server/migrations/`. Operational tool —
-    /// production typically runs migrations out-of-band via `sqlx migrate run`.
+    /// Apply pending migrations from `server/migrations/`. Called once during
+    /// startup in `bin/server.rs` so a freshly-provisioned database (or a
+    /// dropped volume in dev) comes up without a separate `sqlx migrate run`.
+    /// Idempotent: SQLx tracks applied versions in `_sqlx_migrations`.
     pub async fn migrate(&self) -> Result<(), sqlx::migrate::MigrateError> {
         sqlx::migrate!("./migrations").run(&self.pool).await
     }

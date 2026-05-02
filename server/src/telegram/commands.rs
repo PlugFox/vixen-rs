@@ -1,6 +1,6 @@
-//! Slash commands. M1 only ships `/verify` (manual moderator override). `/help`
-//! and `/status` are stubs — they reply with a fixed string so users don't see
-//! "unknown command" until M2/M5 fleshes them out.
+//! Slash commands. `/help` and `/status` are stub replies; `/verify`, `/ban`
+//! and `/unban` are moderator-gated and routed through their respective
+//! services.
 
 use teloxide::utils::command::BotCommands;
 
@@ -15,4 +15,11 @@ pub enum Command {
     /// Id-mode: `/verify <user_id>`.
     #[command(description = "manually verify a user (moderator)")]
     Verify(String),
+    /// Reply-mode: `/ban <optional reason>` (replied to the target message).
+    /// Id-mode: `/ban <user_id> <optional reason>`.
+    #[command(description = "ban a user (reply or with user_id)")]
+    Ban(String),
+    /// Id-mode only: `/unban <user_id>`.
+    #[command(description = "lift a ban by user_id (moderator)")]
+    Unban(String),
 }

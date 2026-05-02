@@ -132,8 +132,9 @@ The flow itself is identical in both call sites:
    // INSERT … ON CONFLICT DO UPDATE … RETURNING.
    // Renderer runs inside spawn_blocking and produces a 480×180 lossless WebP.
 3. let msg = bot.send_photo(chat_id, InputFile::memory(issued.image_webp))
-                .caption(<mention> + " please solve the captcha …")
+                .caption(caption_initial(&mention, issued.attempts_left))
                 .reply_markup(issued.keyboard)
+                .protect_content(true) // no forwarding/copying/saving
                 .await?;
 4. state.captcha.record_message_id(chat_id, user_id, msg.id.0).await?;
 5. state.captcha_state.set_meta(chat_id, msg.id.0, user_id, &short, lifetime).await?;
@@ -267,13 +268,34 @@ Tests assert this by rendering twice and `assert_eq!(bytes_a, bytes_b)`.
 
 ## Implementation notes
 
-- Image is **480 × 180 lossless WebP**, ≤ 30 KB. RGBA, opaque (alpha = 255).
-  Background is a vertical gradient picked deterministically from one of
-  three palettes. Digits are anti-aliased through `ab_glyph` outlines,
-  rotated ±15° with a small scale jitter (108..132 px), per-digit colour
-  picked from the palette.
-- Noise is two layers: ~30..50 quadratic-Bezier curves with low alpha and
-  ~220..320 single-pixel dots in the palette's `noise` colour.
+- Image is **480 × 270 lossless WebP** (16:9, 1.78:1), 60 – 110 KB
+  typical (budget ≤ 150 KB). RGBA, opaque (alpha = 255). The 16:9 ratio
+  sits below Telegram's mobile preview crop threshold (~1.91:1) so
+  captchas display in full on iOS / Android / Desktop / Web without a
+  tap-to-expand.
+- Internally rasterised at **2× supersample resolution (960 × 540)**
+  and downscaled with **Lanczos3** before encoding. Cheap free
+  anti-aliasing on rotated digit edges, geometric shapes and line
+  strokes — the per-pixel coverage from `ab_glyph` survives the filter
+  as a clean soft edge in the final output.
+- Lossless WebP via `image::codecs::webp::WebPEncoder::new_lossless`.
+  No standalone `webp` / `libwebp` dependency — the renderer talks
+  only to the `image` crate.
+- Layered composition (each layer alpha-composites onto the same
+  buffer at supersampled resolution):
+  1. **Background gradient** — top→bottom lerp picked deterministically
+     from one of six palettes (twilight / forest / plum / sky-pastel /
+     lavender-mist / coral). Light and dark themes share the codepath.
+  2. **18..22 background shapes** — circles, rectangles, thick Bresenham
+     lines drawn from the palette's accent colour set at low alpha.
+  3. **4 digit glyphs** — `ab_glyph` outlines, scale-jittered (216..264 px
+     in supersampled space), rotated ±15° around the glyph centre,
+     position-jittered, per-digit accent colour from the palette.
+  4. **30..40 quadratic Bézier curves** — organic noise overlay in the
+     palette's `noise` colour.
+  5. **18..22 foreground shapes** — small translucent whites/greys laid
+     on top of the digits to break up monolithic glyph fills (a naive
+     OCR signal) without harming readability.
 - Font is loaded as `&'static [u8]` via `include_bytes!` in
   `services/captcha/fonts.rs` — never read from disk per request.
 - Rendering happens inside `tokio::task::spawn_blocking` because `image` +

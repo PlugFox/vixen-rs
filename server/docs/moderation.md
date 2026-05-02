@@ -67,6 +67,21 @@ Race scenario: bot detects spam and starts the ban flow; a moderator simultaneou
 
 If `actor_kind` differs between the two attempts (bot vs moderator), the recorded one is whichever landed first.
 
+### id-mode (NULL message_id) atomicity
+
+The unique key `(chat_id, target_user_id, action, message_id)` doesn't help
+when `message_id IS NULL` — Postgres treats NULLs as distinct, so two
+concurrent id-mode `/ban 12345` calls would both insert and both fire
+`ban_chat_member`. `ModerationService::apply` handles this by opening a
+transaction, taking `SELECT 1 FROM chats WHERE chat_id = $1 FOR UPDATE`,
+running a behaviour check (`last action in (ban, unban) for this target ==
+the action we're about to take?`), and only inserting + executing the bot
+call when the behaviour differs. Concurrent id-mode attempts serialise on
+the chat row lock; the second attempt's behaviour check sees the first's
+`ban` and short-circuits to `Outcome::AlreadyApplied` without writing a
+second row. Reply-mode bans (with a real `message_id`) skip the lock and
+rely on the unique constraint, which Postgres serialises for free.
+
 ## Audit trail
 
 The dashboard's audit-log search is the read view onto `moderation_actions`. Public-report page does NOT show this — the action ledger contains user IDs, which are PII.

@@ -1,6 +1,6 @@
 [package]
 name = "vixen-server"
-version = "0.2.1"
+version = "0.3.8"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -127,7 +127,6 @@ image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
 ] }
-webp = "0.3"
 ab_glyph = "0.2"
 plotters = { version = "0.3", default-features = false, features = [
     "bitmap_backend",
@@ -137,6 +136,9 @@ plotters = { version = "0.3", default-features = false, features = [
 
 # Hashing
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Unicode normalization (NFKC for spam pipeline normalize step)
+unicode-normalization = "0.1"
 sha2 = "0.10"
 hmac = "0.12"
 subtle = "2.6"
@@ -191,6 +193,9 @@ pretty_assertions = "1"
 wiremock = "0.6"
 tempfile = "3"
 serde_yaml = "0.9"
+# teloxide_tests 0.2 is the last version targeting teloxide 0.13.
+# Upgrading teloxide is its own milestone (M5+); pin here.
+teloxide_tests = "0.2"
 
 [build-dependencies]
 chrono = "0.4"

@@ -20,6 +20,9 @@ use vixen_server::{
     database::{Database, Redis, ensure_watched_chats},
     jobs,
     services::captcha::{CaptchaService, CaptchaState, Fonts},
+    services::cas_client::CasClient,
+    services::moderation_service::ModerationService,
+    services::spam::service::SpamService,
     telegram::commands::Command,
     telegram::{WatchedChats, build_dispatcher},
     telemetry,
@@ -30,7 +33,12 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Best-effort .env load for local dev; production injects vars via the orchestrator.
-    let _ = dotenvy::dotenv();
+    // First match wins, so an explicit `.env` in CWD overrides the repo template path.
+    for path in [".env", "config/.env"] {
+        if dotenvy::from_filename(path).is_ok() {
+            break;
+        }
+    }
 
     let config = Arc::new(Config::parse());
 
@@ -65,6 +73,9 @@ async fn main() -> anyhow::Result<()> {
     db.health_check().await.context("postgres health")?;
     info!("postgres connected");
 
+    db.migrate().await.context("apply pending migrations")?;
+    info!("postgres migrations applied");
+
     let redis = Arc::new(
         Redis::connect(config.redis_url.clone())
             .await
@@ -89,19 +100,27 @@ async fn main() -> anyhow::Result<()> {
     let captcha = Arc::new(CaptchaService::new(db.pool().clone(), fonts));
     let captcha_state = Arc::new(CaptchaState::new(redis.clone()));
 
+    // Bot is constructed before AppState so M2 services (ModerationService)
+    // can capture a clone — Bot is cheap to clone.
+    let bot = Bot::new(config.bot_token.expose());
+
+    let cas = CasClient::new(redis.clone(), config.cas_base_url.clone());
+    let spam = Arc::new(SpamService::new(db.pool().clone(), cas));
+    let moderation = ModerationService::new(db.pool().clone(), bot.clone());
+
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
         redis: redis.clone(),
         captcha: captcha.clone(),
         captcha_state: captcha_state.clone(),
+        spam: spam.clone(),
+        moderation: moderation.clone(),
     };
 
     let http_handle = spawn_http(&config.address, state.clone(), cancel.clone())
         .await
         .context("HTTP server failed to start")?;
-
-    let bot = Bot::new(config.bot_token.expose());
 
     if let Err(e) = bot.set_my_commands(Command::bot_commands()).await {
         warn!(error = %e, "set_my_commands failed");
@@ -129,6 +148,9 @@ async fn main() -> anyhow::Result<()> {
             error!(?e, "redis pubsub task join error");
         }
     };
+
+    cancel.cancelled().await;
+    info!("shutdown initiated, draining tasks");
 
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, join).await {
         Ok(()) => info!("shutdown clean"),

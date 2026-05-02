@@ -6,6 +6,8 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::database::{Database, Redis};
 use crate::services::captcha::{CaptchaService, CaptchaState};
+use crate::services::moderation_service::ModerationService;
+use crate::services::spam::service::SpamService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -18,4 +20,10 @@ pub struct AppState {
     /// `is_verified` cache. PG owns the durable challenge row and
     /// verified-user ledger; this is the UI scratchpad alongside it.
     pub captcha_state: Arc<CaptchaState>,
+    /// M2 spam pipeline: normalize → xxh3 dedup → CAS → n-gram cascade.
+    /// Returns a `Verdict` that the handler dispatches through `moderation`.
+    pub spam: Arc<SpamService>,
+    /// Centralised moderation: idempotent ledger + bot side-effect for every
+    /// ban / unban / delete (auto or manual).
+    pub moderation: Arc<ModerationService>,
 }

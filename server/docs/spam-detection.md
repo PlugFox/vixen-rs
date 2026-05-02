@@ -1,6 +1,12 @@
 # Spam Detection Pipeline
 
-Triggered by every `Message` from a verified user. (Unverified users go through CAPTCHA first; their messages are deleted immediately if they speak before solving.)
+Triggered by every text `Message` from a verified, non-admin user.
+Non-text messages (photos, stickers, polls, voice, video) are skipped — the
+n-gram set is text-only, and the dedup hash would just degenerate to the
+file_id of the attachment. Admin messages bypass the pipeline (they
+wouldn't post spam, and the bot can't ban them anyway).
+Unverified users go through CAPTCHA first; their messages are deleted by
+`message_gate` before this pipeline ever runs.
 
 ## Cascade
 
@@ -51,6 +57,15 @@ incoming message
 ## Idempotency
 
 Every action goes through `ModerationService`, which inserts into `moderation_actions` with the uniqueness key `(chat_id, target_user_id, action, message_id)`. Re-processing the same `Message` (Telegram retried, bot restarted mid-handler) hits the unique-violation, which the service treats as success without re-running the side-effect (ban / delete).
+
+**id-mode bans / unbans (`message_id IS NULL`)** can't rely on the unique key
+— Postgres treats NULLs as distinct, so two `INSERT`s with NULL `message_id`
+both succeed. `ModerationService::apply` opens a transaction, takes a
+`SELECT … FOR UPDATE` lock on the corresponding `chats` row, runs a
+behaviour check (last terminal action for this user is already the target?),
+and only then inserts. That serialises concurrent id-mode actions on the
+same chat. Message-scoped actions (Delete, reply-mode Ban) skip the lock
+and rely on the unique constraint, which Postgres serialises atomically.
 
 ## CAS integration
 

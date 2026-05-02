@@ -121,6 +121,22 @@ pub struct Config {
     /// Per-connection statement timeout (ms) — set via `SET LOCAL` on acquire.
     #[arg(long, env = "CONFIG_DB_STATEMENT_TIMEOUT_MS", default_value_t = 30_000)]
     pub db_statement_timeout_ms: u64,
+
+    // ── Spam pipeline (M2) ──
+    /// CAS API base URL. Override in tests to point at a wiremock server;
+    /// production uses the public CAS endpoint.
+    #[arg(
+        long,
+        env = "CONFIG_CAS_BASE_URL",
+        default_value = "https://api.cas.chat"
+    )]
+    pub cas_base_url: String,
+
+    /// Days a `spam_messages` row survives before the cleanup job prunes it.
+    /// 14 days matches the Dart prototype default — long enough to catch
+    /// long-tail recurrences, short enough to bound table growth.
+    #[arg(long, env = "CONFIG_SPAM_RETENTION_DAYS", default_value_t = 14)]
+    pub spam_retention_days: u32,
 }
 
 impl Config {
