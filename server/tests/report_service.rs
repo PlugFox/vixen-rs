@@ -1,6 +1,6 @@
 //! Integration tests for `ReportService::aggregate`. Live Postgres only —
-//! we seed `daily_stats` + `moderation_actions` + `spam_messages` rows, run
-//! the aggregator, and assert the returned struct matches the seed.
+//! we seed `daily_stats` + `moderation_actions` + `spam_messages_per_chat`
+//! rows, run the aggregator, and assert the returned struct matches the seed.
 
 #![cfg(unix)]
 
@@ -11,15 +11,9 @@ use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use vixen_server::services::report_service::ReportService;
 
-fn requires_postgres() -> bool {
-    std::env::var("DATABASE_URL").is_ok()
-}
-
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn aggregate_sums_seeded_metrics(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
 
@@ -55,7 +49,8 @@ async fn aggregate_sums_seeded_metrics(pool: PgPool) {
     .await
     .unwrap();
 
-    // Seed top phrases (global table).
+    // Seed per-chat top phrases (sample_body lives in the global
+    // spam_messages, hit_count in the chat-scoped spam_messages_per_chat).
     sqlx::query(
         r#"
         INSERT INTO spam_messages (xxh3_hash, sample_body, hit_count, last_seen)
@@ -64,6 +59,18 @@ async fn aggregate_sums_seeded_metrics(pool: PgPool) {
         ON CONFLICT (xxh3_hash) DO NOTHING
         "#,
     )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO spam_messages_per_chat (chat_id, xxh3_hash, hit_count, last_seen)
+        VALUES ($1, 1, 7, NOW()),
+               ($1, 2, 3, NOW())
+        ON CONFLICT DO NOTHING
+        "#,
+    )
+    .bind(chat_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -92,11 +99,9 @@ async fn aggregate_sums_seeded_metrics(pool: PgPool) {
     );
 }
 
-#[sqlx::test]
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres"]
 async fn aggregate_with_no_data_returns_zeros(pool: PgPool) {
-    if !requires_postgres() {
-        return;
-    }
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
 

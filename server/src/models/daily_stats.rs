@@ -98,3 +98,59 @@ where
     .context("SELECT daily_stats")?;
     Ok(row.unwrap_or(0))
 }
+
+/// Outcome of a [`try_reserve`] call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReserveOutcome {
+    /// Reservation committed; counter is now `new_value`.
+    Reserved { new_value: i64 },
+    /// Counter would exceed `budget`; nothing changed. `used` is the current
+    /// counter value (so callers can include it in their skip reason).
+    Rejected { used: i64 },
+}
+
+/// Atomically reserve `by` against `(chat_id, today, metric)`, gated by
+/// `budget`. The INSERT/UPDATE happens in a single statement, so two
+/// concurrent reservations cannot both observe the same remaining budget
+/// and both succeed.
+///
+/// Caller must ensure `by <= budget` — the SQL only gates the UPDATE branch
+/// against the budget, so a first-time INSERT could otherwise go straight to
+/// `value = by` even if that already exceeds it. We mirror that constraint
+/// here as an early `Rejected`.
+pub async fn try_reserve(
+    pool: &sqlx::PgPool,
+    chat_id: i64,
+    metric: Metric,
+    by: i64,
+    budget: i64,
+) -> Result<ReserveOutcome> {
+    if by > budget {
+        let used = get(pool, chat_id, chrono::Utc::now().date_naive(), metric).await?;
+        return Ok(ReserveOutcome::Rejected { used });
+    }
+    let new_value = sqlx::query_scalar!(
+        r#"
+        INSERT INTO daily_stats AS ds (chat_id, date, kind, value)
+        VALUES ($1, CURRENT_DATE, $2, $3)
+        ON CONFLICT (chat_id, date, kind) DO UPDATE
+            SET value = ds.value + EXCLUDED.value
+        WHERE ds.value + EXCLUDED.value <= $4
+        RETURNING value
+        "#,
+        chat_id,
+        metric.as_db_str(),
+        by,
+        budget,
+    )
+    .fetch_optional(pool)
+    .await
+    .context("UPSERT daily_stats (try_reserve)")?;
+    match new_value {
+        Some(v) => Ok(ReserveOutcome::Reserved { new_value: v }),
+        None => {
+            let used = get(pool, chat_id, chrono::Utc::now().date_naive(), metric).await?;
+            Ok(ReserveOutcome::Rejected { used })
+        }
+    }
+}

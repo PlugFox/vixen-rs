@@ -33,8 +33,13 @@ pub async fn lookup(pool: &PgPool, hash: i64) -> Result<DedupOutcome> {
     })
 }
 
-/// Bump hit-count and last-seen on a known-spam re-occurrence.
-pub async fn bump(pool: &PgPool, hash: i64) -> Result<()> {
+/// Bump hit-count and last-seen on a known-spam re-occurrence. Updates both
+/// the global `spam_messages` row (corpus-wide counter) and the chat-scoped
+/// `spam_messages_per_chat` row (drives the report's "top phrases" section).
+/// Wrapped in a single transaction so a partial bump can't leave the two
+/// counters out of sync.
+pub async fn bump(pool: &PgPool, chat_id: i64, hash: i64) -> Result<()> {
+    let mut tx = pool.begin().await.context("BEGIN bump")?;
     sqlx::query!(
         r#"
         UPDATE spam_messages
@@ -44,16 +49,35 @@ pub async fn bump(pool: &PgPool, hash: i64) -> Result<()> {
         "#,
         hash,
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("UPDATE spam_messages")?;
+    sqlx::query!(
+        r#"
+        INSERT INTO spam_messages_per_chat (chat_id, xxh3_hash, hit_count, last_seen)
+        VALUES ($1, $2, 1, NOW())
+        ON CONFLICT (chat_id, xxh3_hash) DO UPDATE
+            SET hit_count = spam_messages_per_chat.hit_count + 1,
+                last_seen = NOW()
+        "#,
+        chat_id,
+        hash,
+    )
+    .execute(&mut *tx)
+    .await
+    .context("UPSERT spam_messages_per_chat")?;
+    tx.commit().await.context("COMMIT bump")?;
     Ok(())
 }
 
 /// Register a new spam fingerprint (called by the n-gram and CAS branches so
 /// the next copy of the same text dedups in O(1)). Idempotent: re-recording
-/// the same hash bumps `hit_count` instead of failing on the PK conflict.
-pub async fn record(pool: &PgPool, hash: i64, sample: &str) -> Result<()> {
+/// the same hash bumps `hit_count` instead of failing on the PK conflict. The
+/// write is split between the global `spam_messages` (sample body, corpus-wide
+/// counter) and `spam_messages_per_chat` (chat-scoped counter for reports);
+/// both go in one transaction so the FK from per-chat to spam_messages always
+/// resolves.
+pub async fn record(pool: &PgPool, chat_id: i64, hash: i64, sample: &str) -> Result<()> {
     let truncated = if sample.len() > SAMPLE_BODY_MAX {
         // Truncate on a char boundary to keep sample_body valid UTF-8.
         let mut end = SAMPLE_BODY_MAX;
@@ -64,6 +88,7 @@ pub async fn record(pool: &PgPool, hash: i64, sample: &str) -> Result<()> {
     } else {
         sample
     };
+    let mut tx = pool.begin().await.context("BEGIN record")?;
     sqlx::query!(
         r#"
         INSERT INTO spam_messages (xxh3_hash, sample_body)
@@ -75,8 +100,23 @@ pub async fn record(pool: &PgPool, hash: i64, sample: &str) -> Result<()> {
         hash,
         truncated,
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("INSERT spam_messages")?;
+    sqlx::query!(
+        r#"
+        INSERT INTO spam_messages_per_chat (chat_id, xxh3_hash, hit_count, last_seen)
+        VALUES ($1, $2, 1, NOW())
+        ON CONFLICT (chat_id, xxh3_hash) DO UPDATE
+            SET hit_count = spam_messages_per_chat.hit_count + 1,
+                last_seen = NOW()
+        "#,
+        chat_id,
+        hash,
+    )
+    .execute(&mut *tx)
+    .await
+    .context("UPSERT spam_messages_per_chat")?;
+    tx.commit().await.context("COMMIT record")?;
     Ok(())
 }

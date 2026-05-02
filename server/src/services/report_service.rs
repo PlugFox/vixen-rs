@@ -8,7 +8,8 @@
 //! functions of the returned struct, so unit tests don't need a bot.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, LocalResult, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono_tz::Tz;
 use sqlx::PgPool;
 
 use crate::models::report::{CaptchaCounts, DailyPoint, ReportData, TopPhrase};
@@ -85,19 +86,22 @@ impl ReportService {
 
         let top_phrases = sqlx::query!(
             r#"
-            SELECT sample_body, hit_count
-            FROM spam_messages
-            WHERE last_seen >= $1 AND last_seen < $2
-            ORDER BY hit_count DESC, last_seen DESC
-            LIMIT $3
+            SELECT s.sample_body AS "sample_body!", smc.hit_count AS "hit_count!"
+            FROM spam_messages_per_chat smc
+            JOIN spam_messages s USING (xxh3_hash)
+            WHERE smc.chat_id = $1
+              AND smc.last_seen >= $2 AND smc.last_seen < $3
+            ORDER BY smc.hit_count DESC, smc.last_seen DESC
+            LIMIT $4
             "#,
+            chat_id,
             from,
             to,
             TOP_PHRASES_LIMIT,
         )
         .fetch_all(&self.db)
         .await
-        .context("SELECT spam_messages (top phrases)")?
+        .context("SELECT spam_messages_per_chat (top phrases)")?
         .into_iter()
         .map(|r| TopPhrase {
             text: r.sample_body,
@@ -222,25 +226,48 @@ pub fn last_24h_window(to: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     (to - Duration::hours(24), to)
 }
 
-/// Convenience: window covering the entire chat-local day for `date`. The
-/// daily_stats column is server-UTC, so this just bounds at the UTC midnights
-/// surrounding the given date — consistent with the way [`sum_metric`] reads.
+/// UTC-bounded version of [`day_window_local`] — used when the caller has
+/// no chat timezone in scope (tests, UTC-only chats). Aliases the local
+/// helper with `chrono_tz::UTC`.
 pub fn day_window_utc(date: NaiveDate) -> (DateTime<Utc>, DateTime<Utc>) {
-    let start = date
+    day_window_local(date, chrono_tz::UTC)
+}
+
+/// UTC `[from, to)` window covering the **chat-local** day `date` in `tz`.
+///
+/// Computed by mapping local midnight and the next local midnight through
+/// the chat's IANA timezone. moderation_actions queries (which COUNT on
+/// `created_at`) are precise over this window. `daily_stats` reads use the
+/// returned UTC dates and may overlap two UTC date buckets when `tz != UTC`,
+/// so for non-UTC chats a single chat-local day's counters can include
+/// fragments of the adjacent local day. The daily_stats schema is
+/// server-UTC-bucketed and the M3 design intentionally avoids re-keying it
+/// per chat — the resulting imprecision is documented in `docs/reports.md`.
+///
+/// DST handling: an ambiguous local midnight (fall-back hour) resolves to
+/// the **earliest** UTC instant. A non-existent local midnight (spring
+/// forward, theoretically possible if a zone moves the clock at 00:00) falls
+/// back to UTC midnight of `date`.
+pub fn day_window_local(date: NaiveDate, tz: Tz) -> (DateTime<Utc>, DateTime<Utc>) {
+    let start_local = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
+    let end_local = (date + Duration::days(1))
         .and_hms_opt(0, 0, 0)
-        .expect("midnight is always valid")
-        .and_utc();
-    let end = (date + Duration::days(1))
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight is always valid")
-        .and_utc();
-    (start, end)
+        .expect("midnight is always valid");
+    (resolve_local(start_local, tz), resolve_local(end_local, tz))
+}
+
+fn resolve_local(dt: NaiveDateTime, tz: Tz) -> DateTime<Utc> {
+    match tz.from_local_datetime(&dt) {
+        LocalResult::Single(t) => t.with_timezone(&Utc),
+        LocalResult::Ambiguous(early, _) => early.with_timezone(&Utc),
+        LocalResult::None => dt.and_utc(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Datelike;
+    use chrono::{Datelike, Timelike};
 
     #[test]
     fn last_24h_window_is_24h_long() {
@@ -256,5 +283,31 @@ mod tests {
         assert_eq!(to - from, Duration::days(1));
         assert_eq!(from.date_naive(), date);
         assert_eq!(from.day(), 3);
+    }
+
+    #[test]
+    fn day_window_local_shifts_by_tz_offset() {
+        // 2026-05-03 in UTC+3 (Europe/Moscow, no DST): local midnight is
+        // 2026-05-02 21:00 UTC, end is 2026-05-03 21:00 UTC.
+        let date = NaiveDate::from_ymd_opt(2026, 5, 3).unwrap();
+        let tz: Tz = "Europe/Moscow".parse().unwrap();
+        let (from, to) = day_window_local(date, tz);
+        assert_eq!(to - from, Duration::days(1));
+        assert_eq!(
+            from.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()
+        );
+        assert_eq!(from.hour(), 21);
+        assert_eq!(
+            to.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 3).unwrap()
+        );
+        assert_eq!(to.hour(), 21);
+    }
+
+    #[test]
+    fn day_window_local_with_utc_matches_day_window_utc() {
+        let date = NaiveDate::from_ymd_opt(2026, 5, 3).unwrap();
+        assert_eq!(day_window_utc(date), day_window_local(date, chrono_tz::UTC));
     }
 }

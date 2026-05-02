@@ -329,11 +329,18 @@ async fn stats(bot: Bot, msg: Message, state: AppState) -> Result<()> {
         return Ok(());
     }
 
-    let now = Utc::now();
-    let (from, to) = last_24h_window(now);
-    let report = state.reports.aggregate(msg.chat.id.0, from, to).await?;
-    let lang = chat_language(&state, msg.chat.id.0).await;
-    let body = report_render::render(&report, lang, HeaderKind::Last24h);
+    // Aggregate the chat-local "today so far" window. The previous "last
+    // 24h" copy was misleading because daily_stats is date-bucketed: a
+    // half-open 24-hour query summed two whole calendar days. Switching to
+    // a single chat-local day keeps the displayed counters honest for
+    // metrics that don't store per-event timestamps.
+    let chat_id = msg.chat.id.0;
+    let (today, tz) = daily_report::current_report_date_with_tz(state.db.pool(), chat_id).await?;
+    let day_start = report_service::day_window_local(today, tz).0;
+    let to = Utc::now();
+    let report = state.reports.aggregate(chat_id, day_start, to).await?;
+    let lang = chat_language(&state, chat_id).await;
+    let body = report_render::render(&report, lang, HeaderKind::Today);
 
     let _ = bot
         .send_message(msg.chat.id, body)
@@ -359,8 +366,9 @@ async fn report(bot: Bot, msg: Message, state: AppState) -> Result<()> {
     }
 
     let chat_id = msg.chat.id.0;
-    let report_date = daily_report::current_report_date(state.db.pool(), chat_id).await?;
-    let (from, to) = report_service::day_window_utc(report_date);
+    let (report_date, tz) =
+        daily_report::current_report_date_with_tz(state.db.pool(), chat_id).await?;
+    let (from, to) = report_service::day_window_local(report_date, tz);
     let aggregated = state.reports.aggregate(chat_id, from, to).await?;
 
     let (lang_str, summary_enabled) = match fetch_lang_and_summary(&state, chat_id).await? {

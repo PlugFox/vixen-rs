@@ -6,6 +6,8 @@
 
 BEGIN;
 
+DROP TABLE spam_messages_per_chat;
+
 DROP TABLE report_messages;
 
 CREATE TABLE report_messages (

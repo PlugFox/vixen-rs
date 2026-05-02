@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT s.sample_body AS \"sample_body!\", smc.hit_count AS \"hit_count!\"\n            FROM spam_messages_per_chat smc\n            JOIN spam_messages s USING (xxh3_hash)\n            WHERE smc.chat_id = $1\n              AND smc.last_seen >= $2 AND smc.last_seen < $3\n            ORDER BY smc.hit_count DESC, smc.last_seen DESC\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sample_body!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "hit_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "dae2c1c77998112b5290154c88523cbda906ba36e1bb2f483d599680c24adeae"
+}

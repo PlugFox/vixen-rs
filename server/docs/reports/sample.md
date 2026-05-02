@@ -33,7 +33,11 @@ print!("{}", render(&r, Lang::Ru, HeaderKind::Daily));
 
 ## Raw MarkdownV2 (RU)
 
-```
+The block below is fenced with `~~~` so the inner triple-backtick fences in
+the rendered MarkdownV2 (which Telegram uses for monospace blocks) survive
+intact:
+
+~~~
 📊 *Ежедневный отчёт*
 Vixen test chat
 2026\-05\-01 17:00 → 2026\-05\-02 17:00 UTC
@@ -60,7 +64,7 @@ Vixen test chat
 ▁▁ ▂▂▁█
 SMTWTFS
 ```
-```
+~~~
 
 ## How Telegram renders it
 

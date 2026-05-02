@@ -110,7 +110,7 @@ impl SpamService {
 
         // Step 1 — spam_messages dedup.
         if let DedupOutcome::Hit { hit_count } = dedup::lookup(&self.db, hash).await? {
-            dedup::bump(&self.db, hash).await?;
+            dedup::bump(&self.db, chat_id, hash).await?;
             return Ok(Verdict::Ban {
                 reason_json: json!({
                     "matched_rules": ["xxh3_dedup"],
@@ -125,7 +125,7 @@ impl SpamService {
         if cfg.cas_enabled {
             let user_id = user.id.0 as i64;
             if self.cas.lookup(user_id).await == CasVerdict::Flagged {
-                dedup::record(&self.db, hash, &normalized).await?;
+                dedup::record(&self.db, chat_id, hash, &normalized).await?;
                 return Ok(Verdict::Ban {
                     reason_json: json!({
                         "matched_rules": ["cas"],
@@ -140,7 +140,7 @@ impl SpamService {
         let weights = SpamWeights::from_json(&cfg.spam_weights);
         let (score, matched) = PHRASES.score(&normalized, &weights);
         if score >= cfg.spam_threshold && !matched.is_empty() {
-            dedup::record(&self.db, hash, &normalized).await?;
+            dedup::record(&self.db, chat_id, hash, &normalized).await?;
             return Ok(Verdict::Delete {
                 reason_json: json!({
                     "matched_rules": ["ngram"],

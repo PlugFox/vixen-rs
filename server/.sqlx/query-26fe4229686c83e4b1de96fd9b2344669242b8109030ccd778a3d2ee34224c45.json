@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO spam_messages_per_chat (chat_id, xxh3_hash, hit_count, last_seen)\n        VALUES ($1, $2, 1, NOW())\n        ON CONFLICT (chat_id, xxh3_hash) DO UPDATE\n            SET hit_count = spam_messages_per_chat.hit_count + 1,\n                last_seen = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "26fe4229686c83e4b1de96fd9b2344669242b8109030ccd778a3d2ee34224c45"
+}

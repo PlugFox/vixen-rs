@@ -34,7 +34,7 @@ use tracing::{debug, info, instrument, warn};
 use crate::api::AppState;
 use crate::models::report_message::{self, ReportKind};
 use crate::services::report_render::{HeaderKind, Lang};
-use crate::services::report_service::{ReportService, day_window_utc};
+use crate::services::report_service::{ReportService, day_window_local};
 use crate::services::summary_service::SummaryOutcome;
 use crate::services::{chart_service, report_render};
 
@@ -138,7 +138,7 @@ async fn maybe_fire(
         return Ok(());
     }
 
-    let (from, to) = day_window_utc(report_date);
+    let (from, to) = day_window_local(report_date, tz);
     let report = reports.aggregate(chat_id, from, to).await?;
     if report.messages_seen < cfg.min_activity as i64 {
         info!(
@@ -256,12 +256,20 @@ pub async fn deliver(
 /// chat-local date used as the report key, falling back to UTC if the
 /// chat's `timezone` is malformed.
 pub async fn current_report_date(pool: &PgPool, chat_id: i64) -> Result<NaiveDate> {
+    Ok(current_report_date_with_tz(pool, chat_id).await?.0)
+}
+
+/// Same as [`current_report_date`] but also returns the resolved IANA `Tz`.
+/// `/report` needs both — the date keys the report row, the timezone gives
+/// `day_window_local` precise UTC bounds for the `daily_stats` /
+/// `moderation_actions` window.
+pub async fn current_report_date_with_tz(pool: &PgPool, chat_id: i64) -> Result<(NaiveDate, Tz)> {
     let cfg = fetch_schedule_config(pool, chat_id).await?;
     let tz = cfg
         .as_ref()
         .and_then(|c| c.timezone.parse::<Tz>().ok())
         .unwrap_or(chrono_tz::UTC);
-    Ok(Utc::now().with_timezone(&tz).date_naive())
+    Ok((Utc::now().with_timezone(&tz).date_naive(), tz))
 }
 
 #[cfg(test)]

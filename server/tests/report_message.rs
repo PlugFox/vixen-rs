@@ -120,7 +120,10 @@ async fn delete_for_day_drops_only_target_date(pool: PgPool) {
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires postgres"]
-async fn already_posted_today_reflects_state(pool: PgPool) {
+async fn already_posted_today_requires_both_kinds(pool: PgPool) {
+    // Half-posted days (e.g. text succeeded, chart `send_photo` failed) must
+    // NOT short-circuit the next scheduler tick — the predicate flips to true
+    // only after BOTH text + photo rows exist.
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
     let date = NaiveDate::from_ymd_opt(2026, 5, 3).unwrap();
@@ -128,15 +131,28 @@ async fn already_posted_today_reflects_state(pool: PgPool) {
     assert!(
         !report_message::already_posted_today(&pool, chat_id, date)
             .await
-            .unwrap()
+            .unwrap(),
+        "no rows → not posted"
     );
+
     report_message::record(&pool, chat_id, date, ReportKind::Text, 99)
+        .await
+        .unwrap();
+    assert!(
+        !report_message::already_posted_today(&pool, chat_id, date)
+            .await
+            .unwrap(),
+        "text only → still not posted (retry photo on next tick)"
+    );
+
+    report_message::record(&pool, chat_id, date, ReportKind::Photo, 100)
         .await
         .unwrap();
     assert!(
         report_message::already_posted_today(&pool, chat_id, date)
             .await
-            .unwrap()
+            .unwrap(),
+        "both rows → posted"
     );
 }
 

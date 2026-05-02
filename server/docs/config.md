@@ -23,7 +23,6 @@ Required values cause the server to refuse to start with a clear error message. 
 | `CONFIG_CAS` | bool | `true` | no | Whether to call Combot Anti-Spam during the spam pipeline. |
 | `CONFIG_CAS_URL` | URL | `https://api.cas.chat/check` | no | CAS endpoint. |
 | `CONFIG_CAS_TIMEOUT_MS` | int | `3000` | no | Per-request timeout. Failure is fail-open. |
-| `CONFIG_WEBAPP_BASE_URL` | URL (no trailing `/`) | `http://localhost:3000` | no | Public dashboard base URL. Used by `/report` deep-links. |
 | `CONFIG_OPENAI_BASE_URL` | URL | `https://api.openai.com` | no | OpenAI Chat Completions base URL. Override for tests / self-hosted compatible APIs. |
 | `CONFIG_ADMIN_SECRET` | string | — | yes (in prod) | Bearer for `/admin/*`. Constant-time compared. |
 | `CONFIG_JWT_SECRET` | string ≥ 32 bytes | — | yes (in prod) | HS256 secret for dashboard JWTs. Rotate to invalidate all sessions. |

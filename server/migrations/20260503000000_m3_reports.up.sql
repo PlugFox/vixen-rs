@@ -1,6 +1,6 @@
 -- M3 — Reports.
 --
--- Two changes:
+-- Three changes:
 --
 -- 1. Per-chat config gets four new tunables that the M3 report pipeline reads:
 --      * report_min_activity — daily-report scheduler skips chats with fewer
@@ -21,6 +21,12 @@
 --    'daily_text' / 'daily_photo'. report_date carries the chat-local date
 --    the report was generated for, so re-running on the same day finds the
 --    prior pair and can delete-then-INSERT idempotently.
+--
+-- 3. spam_messages_per_chat — new chat-scoped counter table. The global
+--    spam_messages stays as the canonical sample-body store keyed on the
+--    xxh3-64 hash, but the per-chat hit counter that drives the daily-report
+--    "top phrases" section moves into a dedicated table so reports for chat A
+--    never surface phrases that only fired in chat B.
 
 BEGIN;
 
@@ -47,5 +53,22 @@ CREATE TABLE report_messages (
     PRIMARY KEY (chat_id, report_date, kind)
 );
 CREATE INDEX idx_report_messages_chat_date ON report_messages (chat_id, report_date DESC);
+
+-- ── spam_messages_per_chat ─────────────────────────────────────────────
+-- Per-chat counter for the global xxh3 dedup table. spam_messages.hit_count /
+-- last_seen stay as the corpus-wide aggregate (drives the spam_cleanup TTL);
+-- the per-chat row drives the report's "top phrases" section so phrases never
+-- leak across chats. Both rows are bumped from the same write path; the FK on
+-- xxh3_hash keeps them in lockstep so cleanup-by-hash cascades into the
+-- per-chat counters.
+CREATE TABLE spam_messages_per_chat (
+    chat_id    BIGINT      NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE,
+    xxh3_hash  BIGINT      NOT NULL REFERENCES spam_messages(xxh3_hash) ON DELETE CASCADE,
+    hit_count  BIGINT      NOT NULL DEFAULT 1,
+    last_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chat_id, xxh3_hash)
+);
+CREATE INDEX idx_spam_messages_per_chat_lookup
+    ON spam_messages_per_chat (chat_id, last_seen DESC);
 
 COMMIT;

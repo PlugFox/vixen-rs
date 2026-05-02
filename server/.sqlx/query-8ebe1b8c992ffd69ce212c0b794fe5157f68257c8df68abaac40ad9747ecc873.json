@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)::BIGINT AS \"n!\"\n        FROM report_messages\n        WHERE chat_id = $1 AND report_date = $2\n          AND kind IN ('daily_text', 'daily_photo')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8ebe1b8c992ffd69ce212c0b794fe5157f68257c8df68abaac40ad9747ecc873"
+}

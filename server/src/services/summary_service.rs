@@ -27,7 +27,7 @@ use regex::Regex;
 use sqlx::PgPool;
 use tracing::{debug, info, instrument, warn};
 
-use crate::models::daily_stats::{self, Metric};
+use crate::models::daily_stats::{self, Metric, ReserveOutcome};
 use crate::services::openai_client::{ChatMessage, ChatRole, OpenAiClient};
 
 /// Hard limit on how many `allowed_messages` rows to feed into one summary
@@ -105,6 +105,21 @@ impl SummaryService {
             });
         };
 
+        // If allowed-message logging is disabled, the chat has not opted in
+        // to having its raw text leave the bot. Don't reach for stale rows
+        // captured before the moderator turned the flag off — short-circuit
+        // before either reading allowed_messages or hitting OpenAI.
+        if !cfg.log_allowed_messages {
+            return Ok(SummaryOutcome::Skipped {
+                reason: SkipReason::NoMessages,
+            });
+        }
+
+        // Cheap pre-flight: if today's counter already meets/exceeds the
+        // configured budget there's nothing to reserve, and we want to
+        // surface BudgetExhausted before we go fetch any messages or hit
+        // OpenAI. The atomic check below is the actual race-safe gate.
+        let budget = cfg.summary_token_budget as i64;
         let used_today = daily_stats::get(
             &self.db,
             chat_id,
@@ -112,11 +127,11 @@ impl SummaryService {
             Metric::OpenaiTokensUsed,
         )
         .await?;
-        if used_today >= cfg.summary_token_budget as i64 {
+        if used_today >= budget {
             return Ok(SummaryOutcome::Skipped {
                 reason: SkipReason::BudgetExhausted {
                     used: used_today,
-                    budget: cfg.summary_token_budget as i64,
+                    budget,
                 },
             });
         }
@@ -126,6 +141,23 @@ impl SummaryService {
             return Ok(SummaryOutcome::Skipped {
                 reason: SkipReason::NoMessages,
             });
+        }
+
+        // Pre-charge the worst-case output token count atomically. Two
+        // concurrent /summary calls can't both observe the same remaining
+        // budget — the second one trips the SQL-side WHERE gate and gets
+        // Rejected. After the OpenAI call returns, we adjust by
+        // `actual - reserve` (positive = overshoot, negative = refund).
+        let reserve = MAX_OUTPUT_TOKENS as i64;
+        match daily_stats::try_reserve(&self.db, chat_id, Metric::OpenaiTokensUsed, reserve, budget)
+            .await?
+        {
+            ReserveOutcome::Reserved { .. } => {}
+            ReserveOutcome::Rejected { used } => {
+                return Ok(SummaryOutcome::Skipped {
+                    reason: SkipReason::BudgetExhausted { used, budget },
+                });
+            }
         }
 
         let prompt = build_user_prompt(&messages);
@@ -152,16 +184,17 @@ impl SummaryService {
             .await
             .context("openai chat call")?;
 
-        if completion.total_tokens > 0 {
-            if let Err(e) = daily_stats::increment(
-                &self.db,
-                chat_id,
-                Metric::OpenaiTokensUsed,
-                completion.total_tokens as i64,
-            )
-            .await
+        // Reconcile the pre-charge against actual usage. A full-output
+        // response with a small prompt may settle below `reserve` (refund);
+        // a long-prompt response may push past it (overshoot, but still
+        // bounded — the next call's reservation will see the higher counter
+        // and reject).
+        let delta = completion.total_tokens as i64 - reserve;
+        if delta != 0 {
+            if let Err(e) =
+                daily_stats::increment(&self.db, chat_id, Metric::OpenaiTokensUsed, delta).await
             {
-                warn!(error = ?e, "failed to record openai_tokens_used");
+                warn!(error = ?e, "failed to reconcile openai_tokens_used");
             }
         }
 
@@ -230,7 +263,6 @@ impl SummaryService {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)] // log_allowed_messages reserved for future stricter gating.
 struct SummaryConfig {
     summary_enabled: bool,
     summary_token_budget: i32,

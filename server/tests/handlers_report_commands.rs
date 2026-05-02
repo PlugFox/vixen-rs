@@ -72,11 +72,28 @@ async fn flush_cooldown(redis_url: &str, chat_id: i64) {
         .unwrap_or(());
 }
 
+/// Pre-seed an EMPTY admin cache for `chat_id`. Without this the
+/// `is_moderator_or_admin` gate falls through to `bot.get_chat_administrators`,
+/// and `teloxide_tests` 0.2 doesn't mock that endpoint — the call hits its
+/// actix mock server and returns a 404 in CI, after which the rejection
+/// reply is never sent. Cache hit short-circuits the gate so the handler
+/// always reaches `send_message`.
+async fn seed_empty_admin_cache(
+    redis: &std::sync::Arc<vixen_server::database::Redis>,
+    chat_id: i64,
+) {
+    let captcha_state = vixen_server::services::captcha::CaptchaState::new(redis.clone());
+    captcha_state
+        .set_admins(chat_id, &[])
+        .await
+        .expect("seed empty admin cache");
+}
+
 // ── /stats ──────────────────────────────────────────────────────────────────
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires postgres + redis"]
-async fn stats_replies_with_24h_summary(pool: PgPool) {
+async fn stats_replies_with_today_summary(pool: PgPool) {
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
     seed_moderator(&pool, chat_id, MODERATOR_ID as i64).await;
@@ -92,7 +109,7 @@ async fn stats_replies_with_24h_summary(pool: PgPool) {
     let r = mock.get_responses();
     assert_eq!(r.sent_messages_text.len(), 1);
     let text = &r.sent_messages_text[0].message.text().unwrap_or_default();
-    assert!(text.contains("Сводка за 24 часа"), "got: {text}");
+    assert!(text.contains("Сводка за сегодня"), "got: {text}");
     assert!(text.contains("42"), "messages_seen value missing: {text}");
 }
 
@@ -102,6 +119,7 @@ async fn stats_rejects_non_moderator(pool: PgPool) {
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
     let redis = fresh_redis(REDIS_URL).await;
+    seed_empty_admin_cache(&redis, chat_id).await;
 
     let mock = MockBot::new(cmd_message(chat_id, NON_MODERATOR_ID, "/stats"), handler());
     let state = make_state(pool.clone(), Arc::clone(&redis), mock.bot.clone()).await;
@@ -221,6 +239,7 @@ async fn summary_rejects_non_moderator(pool: PgPool) {
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
     let redis = fresh_redis(REDIS_URL).await;
+    seed_empty_admin_cache(&redis, chat_id).await;
 
     let mock = MockBot::new(
         cmd_message(chat_id, NON_MODERATOR_ID, "/summary"),
@@ -243,6 +262,7 @@ async fn report_rejects_non_moderator(pool: PgPool) {
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
     let redis = fresh_redis(REDIS_URL).await;
+    seed_empty_admin_cache(&redis, chat_id).await;
 
     let mock = MockBot::new(cmd_message(chat_id, NON_MODERATOR_ID, "/report"), handler());
     let state = make_state(pool.clone(), Arc::clone(&redis), mock.bot.clone()).await;

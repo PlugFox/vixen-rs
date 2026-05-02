@@ -50,12 +50,13 @@ impl Lang {
     }
 }
 
-/// Drives the header banner. `Daily` for the scheduled report, `Last24h`
-/// for `/stats`, `OnDemand` for `/report`. Affects the title line only.
+/// Drives the header banner. `Daily` for the scheduled report, `Today`
+/// for `/stats` (chat-local day so far), `OnDemand` for `/report`. Affects
+/// the title line only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeaderKind {
     Daily,
-    Last24h,
+    Today,
     OnDemand,
 }
 
@@ -81,10 +82,10 @@ pub fn render(report: &ReportData, lang: Lang, header: HeaderKind) -> String {
 fn push_header(out: &mut String, report: &ReportData, lang: Lang, header: HeaderKind) {
     let title = match (lang, header) {
         (Lang::Ru, HeaderKind::Daily) => "📊 *Ежедневный отчёт*",
-        (Lang::Ru, HeaderKind::Last24h) => "📊 *Сводка за 24 часа*",
+        (Lang::Ru, HeaderKind::Today) => "📊 *Сводка за сегодня*",
         (Lang::Ru, HeaderKind::OnDemand) => "📊 *Отчёт по запросу*",
         (Lang::En, HeaderKind::Daily) => "📊 *Daily report*",
-        (Lang::En, HeaderKind::Last24h) => "📊 *Last 24 hours*",
+        (Lang::En, HeaderKind::Today) => "📊 *Today's snapshot*",
         (Lang::En, HeaderKind::OnDemand) => "📊 *On-demand report*",
     };
     out.push_str(title);
@@ -456,12 +457,12 @@ mod tests {
     fn header_kind_changes_title() {
         let r = fixture();
         let daily = render(&r, Lang::Ru, HeaderKind::Daily);
-        let last24 = render(&r, Lang::Ru, HeaderKind::Last24h);
+        let today = render(&r, Lang::Ru, HeaderKind::Today);
         let on_demand = render(&r, Lang::Ru, HeaderKind::OnDemand);
         assert!(daily.contains("Ежедневный отчёт"));
-        assert!(!daily.contains("Сводка за 24"));
-        assert!(last24.contains("Сводка за 24 часа"));
-        assert!(!last24.contains("Ежедневный отчёт"));
+        assert!(!daily.contains("Сводка за сегодня"));
+        assert!(today.contains("Сводка за сегодня"));
+        assert!(!today.contains("Ежедневный отчёт"));
         assert!(on_demand.contains("Отчёт по запросу"));
     }
 

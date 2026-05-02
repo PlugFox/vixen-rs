@@ -126,26 +126,30 @@ pub async fn delete_for_day(pool: &PgPool, chat_id: i64, report_date: NaiveDate)
     Ok(())
 }
 
-/// True iff a report has already been posted for `(chat_id, report_date)`.
-/// Used by the scheduler to skip already-posted days when the 5-min ticker
-/// re-fires within the hour window.
+/// True iff **both** the text and the photo rows are present for
+/// `(chat_id, report_date)`. The scheduler uses this to skip days that have
+/// already been fully posted; if `deliver()` succeeded on the text message
+/// but failed on the chart (e.g. spawn-blocking error, send_photo timeout),
+/// only one row will exist and the next 5-min tick must retry the missing
+/// half rather than treating the day as done. Reading the count rather than
+/// EXISTS keeps the predicate transactionally consistent with `record`.
 pub async fn already_posted_today(
     pool: &PgPool,
     chat_id: i64,
     report_date: NaiveDate,
 ) -> Result<bool> {
-    let row = sqlx::query_scalar!(
+    let count = sqlx::query_scalar!(
         r#"
-        SELECT EXISTS(
-            SELECT 1 FROM report_messages
-            WHERE chat_id = $1 AND report_date = $2
-        ) AS "exists!"
+        SELECT COUNT(*)::BIGINT AS "n!"
+        FROM report_messages
+        WHERE chat_id = $1 AND report_date = $2
+          AND kind IN ('daily_text', 'daily_photo')
         "#,
         chat_id,
         report_date,
     )
     .fetch_one(pool)
     .await
-    .context("SELECT EXISTS report_messages")?;
-    Ok(row)
+    .context("SELECT COUNT report_messages")?;
+    Ok(count >= 2)
 }
