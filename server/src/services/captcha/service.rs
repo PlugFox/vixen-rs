@@ -19,10 +19,15 @@ const SOLUTION_LEN: usize = 4;
 const DEFAULT_ATTEMPTS: i16 = 5;
 const DEFAULT_LIFETIME_SECS: i32 = 60;
 
+/// Public face of a freshly-issued challenge.
+///
+/// The plaintext `solution` is intentionally NOT exposed here — it would be a
+/// trivial accident to land in a `tracing::debug!(?issued, ...)` and leak.
+/// Callers that need it (tests only) recompute it from `challenge_id` via the
+/// public deterministic helper [`solution_for`].
 #[derive(Debug, Clone)]
 pub struct IssuedChallenge {
     pub challenge_id: Uuid,
-    pub solution: String,
     pub image_webp: Vec<u8>,
     pub keyboard: InlineKeyboardMarkup,
     pub expires_at: DateTime<Utc>,
@@ -38,10 +43,13 @@ pub enum Outcome {
     AlreadyVerified,
     /// Wrong attempt; `n` attempts remain and the row is intact.
     WrongLeft(i16),
-    /// Final wrong attempt; the challenge row has been deleted, the caller
-    /// should kick the user.
+    /// Final wrong attempt; the challenge row has been deleted and both
+    /// `captcha_failed` + `kick` ledger rows are written. Caller should kick
+    /// the user via Telegram.
     WrongFinal,
-    /// Challenge has expired (caller should kick + cleanup).
+    /// Challenge expired before being solved; the row has been deleted and
+    /// both `captcha_expired` + `kick` ledger rows are written. Caller should
+    /// kick the user via Telegram (the expiry-job sweep won't pick it up).
     Expired,
     /// No pending challenge for `(chat_id, user_id)`. Likely a delayed callback
     /// after the row was already cleaned up.
@@ -118,7 +126,6 @@ impl CaptchaService {
         let bytes = self.render(row.id, &solution).await?;
         Ok(IssuedChallenge {
             challenge_id: row.id,
-            solution,
             image_webp: bytes,
             keyboard: digit_pad(row.id),
             expires_at: row.expires_at,
@@ -201,6 +208,45 @@ impl CaptchaService {
         };
 
         if row.expires_at < Utc::now() {
+            // Clean up inside the tx so the expiry job's sweep doesn't pick
+            // this row up later and fire a duplicate kick + duplicate ledger
+            // pair. We write both `captcha_expired` and `kick` here for
+            // symmetry with the job's two-row audit; the actual Telegram kick
+            // happens in the caller's `on_kick`. ON CONFLICT DO NOTHING keeps
+            // the ledger idempotent if the job races us.
+            sqlx::query!(
+                r#"DELETE FROM captcha_challenges WHERE chat_id = $1 AND user_id = $2"#,
+                chat_id,
+                user_id,
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query!(
+                r#"
+                INSERT INTO moderation_actions
+                    (chat_id, target_user_id, action, actor_kind, message_id, reason)
+                VALUES ($1, $2, 'captcha_expired', 'bot', $3, 'lifetime')
+                ON CONFLICT DO NOTHING
+                "#,
+                chat_id,
+                user_id,
+                row.telegram_message_id,
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query!(
+                r#"
+                INSERT INTO moderation_actions
+                    (chat_id, target_user_id, action, actor_kind, message_id, reason)
+                VALUES ($1, $2, 'kick', 'bot', $3, 'captcha_expired')
+                ON CONFLICT DO NOTHING
+                "#,
+                chat_id,
+                user_id,
+                row.telegram_message_id,
+            )
+            .execute(&mut *tx)
+            .await?;
             tx.commit().await?;
             return Ok(Outcome::Expired);
         }
@@ -255,6 +301,21 @@ impl CaptchaService {
                 INSERT INTO moderation_actions
                     (chat_id, target_user_id, action, actor_kind, message_id, reason)
                 VALUES ($1, $2, 'captcha_failed', 'bot', $3, 'wrong-final')
+                ON CONFLICT DO NOTHING
+                "#,
+                chat_id,
+                user_id,
+                row.telegram_message_id,
+            )
+            .execute(&mut *tx)
+            .await?;
+            // Mirror the expiry-path audit: a kick row alongside the cause.
+            // The handler fires the actual Telegram kick after this commits.
+            sqlx::query!(
+                r#"
+                INSERT INTO moderation_actions
+                    (chat_id, target_user_id, action, actor_kind, message_id, reason)
+                VALUES ($1, $2, 'kick', 'bot', $3, 'captcha_failed')
                 ON CONFLICT DO NOTHING
                 "#,
                 chat_id,
@@ -386,8 +447,11 @@ impl CaptchaService {
     }
 }
 
-/// Deterministic 4-digit string derived from the challenge UUID.
-fn solution_for(challenge_id: Uuid) -> String {
+/// Deterministic 4-digit string derived from the challenge UUID. Public so
+/// that integration tests can recompute the expected solution from the
+/// `challenge_id` returned by [`CaptchaService::issue_challenge`] without
+/// having to expose the value through the public `IssuedChallenge` struct.
+pub fn solution_for(challenge_id: Uuid) -> String {
     let mut h = xxh3_64(challenge_id.as_bytes());
     let mut s = String::with_capacity(SOLUTION_LEN);
     for _ in 0..SOLUTION_LEN {

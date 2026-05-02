@@ -10,9 +10,11 @@ use tracing::{error, info};
 
 use crate::api::AppState;
 
-/// Spawn every registered job and return their join handles. Each task wraps
-/// the job's `run` future and logs a panic-or-error exit at error level so
-/// silent crashes are visible in prod logs.
+/// Spawn every registered job and return their join handles. Each task logs
+/// a clean exit (`Ok(())`) or a job-level error returned by `run`. **Panics
+/// inside `run` are NOT caught here** — they unwind the spawned task and
+/// surface as a `JoinError` when the caller awaits the returned handle, which
+/// is where panic logging happens (see `bin/server.rs`).
 pub fn spawn_all(bot: Bot, state: AppState, shutdown: CancellationToken) -> Vec<JoinHandle<()>> {
     vec![spawn_named(
         captcha_expiry::NAME,

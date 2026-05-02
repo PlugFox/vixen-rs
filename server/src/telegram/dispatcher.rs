@@ -68,9 +68,12 @@ pub fn build_dispatcher(
                 .unwrap_or(false)
         })
         .filter(|q: CallbackQuery| {
+            // Match the full `vc:` prefix (with separator) so unrelated future
+            // callbacks like `vcoupon:` don't get routed into the captcha
+            // handler. `CALLBACK_PREFIX` itself is the bare scheme tag.
             q.data
                 .as_deref()
-                .is_some_and(|d| d.starts_with(CALLBACK_PREFIX))
+                .is_some_and(|d| d.starts_with(&format!("{CALLBACK_PREFIX}:")))
         })
         .endpoint(captcha_handler::handle);
 

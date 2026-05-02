@@ -6,9 +6,7 @@
 
 use anyhow::Result;
 use teloxide::prelude::*;
-use teloxide::types::{
-    ChatMemberKind, ChatMemberStatus, ChatMemberUpdated, ChatPermissions, InputFile,
-};
+use teloxide::types::{ChatMemberKind, ChatMemberUpdated, ChatPermissions, InputFile};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
@@ -107,26 +105,34 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
             }
         }
         Err(e) => {
-            warn!(error = %e, "send_photo failed; expiry job will lift the restrict");
+            warn!(
+                error = %e,
+                "send_photo failed; expiry job will kick the user after the challenge timeout"
+            );
         }
     }
 
     Ok(())
 }
 
-/// True for transitions Left/Kicked → Member (or Restricted with `is_member`).
-/// We deliberately ignore promotions / role changes that keep the user a
-/// member already.
+/// True for transitions Left/Kicked → present-in-chat. "Present" includes
+/// `Restricted { is_member: true }` because chats with default-restricted
+/// permissions deliver fresh joins in that state — without this branch the
+/// captcha never fires for those chats. Promotions / role changes (already a
+/// member) are deliberately skipped.
 fn is_fresh_join(event: &ChatMemberUpdated) -> bool {
-    let was_present = matches!(
-        event.old_chat_member.kind,
-        ChatMemberKind::Member
-            | ChatMemberKind::Owner(_)
-            | ChatMemberKind::Administrator(_)
-            | ChatMemberKind::Restricted(_)
-    );
-    let is_present_now = matches!(event.new_chat_member.status(), ChatMemberStatus::Member);
-    !was_present && is_present_now
+    !is_present_in_chat(&event.old_chat_member.kind)
+        && is_present_in_chat(&event.new_chat_member.kind)
+}
+
+fn is_present_in_chat(kind: &ChatMemberKind) -> bool {
+    match kind {
+        ChatMemberKind::Member | ChatMemberKind::Owner(_) | ChatMemberKind::Administrator(_) => {
+            true
+        }
+        ChatMemberKind::Restricted(r) => r.is_member,
+        ChatMemberKind::Left | ChatMemberKind::Banned(_) => false,
+    }
 }
 
 fn mention(user: &teloxide::types::User) -> String {

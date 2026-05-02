@@ -110,13 +110,24 @@ async fn main() -> anyhow::Result<()> {
     let dispatcher_handle = spawn_dispatcher(bot.clone(), &config, state.clone(), cancel.clone());
     let job_handles = jobs::spawn_all(bot.clone(), state.clone(), cancel.clone());
 
+    // Surface JoinErrors (panics, abort) from each long-running task. Without
+    // this, a job panic during shutdown is swallowed and the operator sees
+    // only a "shutdown clean" log line.
     let join = async {
-        let _ = http_handle.await;
-        let _ = dispatcher_handle.await;
-        for handle in job_handles {
-            let _ = handle.await;
+        if let Err(e) = http_handle.await {
+            error!(?e, "HTTP server task join error");
         }
-        let _ = pubsub_handle.await;
+        if let Err(e) = dispatcher_handle.await {
+            error!(?e, "telegram dispatcher task join error");
+        }
+        for (idx, handle) in job_handles.into_iter().enumerate() {
+            if let Err(e) = handle.await {
+                error!(job_index = idx, ?e, "background job task join error");
+            }
+        }
+        if let Err(e) = pubsub_handle.await {
+            error!(?e, "redis pubsub task join error");
+        }
     };
 
     match tokio::time::timeout(SHUTDOWN_TIMEOUT, join).await {

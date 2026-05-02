@@ -50,8 +50,18 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 - captcha `is_verified` hot path on join now consults a Redis cache (`cap:verified:{chat}:{user}`, 7d TTL) before falling back to PostgreSQL, then writes back on PG hit. Eliminates a PG round-trip on every join event for returning users. (server)
 - captcha `WrongLeft` now clears the input buffer in Redis and resets the caption mask, so the user can immediately retry instead of having to backspace four times to free a buffer pinned at `SOLUTION_LEN`. (server)
 - `/verify` now populates the Redis verified-cache (`cap:verified:{chat}:{user}`), so a moderator-verified user skips the PG round-trip on their next join instead of relying on lazy fill. (server)
+- captcha `Outcome::Expired` path is now transactional: `solve()` deletes the row and writes both `captcha_expired` + `kick` ledger rows inside the locking tx, so the expiry job's sweep no longer picks the row up and fires a duplicate kick + duplicate Telegram API calls. (server)
+- captcha `Outcome::WrongFinal` path now also writes a `kick` ledger row alongside `captcha_failed`, matching the audit trail for the expiry path. (server)
+- callback dispatcher prefix filter now matches `vc:` (with separator) instead of `vc`, so future unrelated callbacks like `vcoupon:…` won't be misrouted into the captcha handler. (server)
+- `is_fresh_join` now treats `Restricted { is_member: true }` as a present-in-chat state on both the old and new sides of the transition, so chats with default-restricted permissions actually trigger the captcha on join. (server)
+- `is_moderator` doc no longer claims a `chat_moderators` fallback that doesn't exist — on Telegram-API failure we deny the call and log; M2+ may add a per-chat moderator allow-list. (server)
+- `bin/server.rs` now logs `JoinError` from each long-running task on shutdown (HTTP / dispatcher / jobs / pubsub) instead of silently dropping panics into `let _ = handle.await;`. (server)
+- `member_update.rs` log on `send_photo` failure correctly says the expiry job will *kick* (not "lift the restrict"). (server)
+- `jobs::spawn_named` doc no longer claims to log panics — panics surface as `JoinError` on the returned handle and are logged at the `bin/server.rs` await sites. (server)
 
 ### Removed
+
+- `IssuedChallenge.solution` field — the plaintext captcha solution no longer leaves `CaptchaService` through the public `IssuedChallenge` struct, eliminating an accidental-`tracing::debug!(?issued)` leak path. Tests that need the solution recompute it from `challenge_id` via the public deterministic helper `solution_for`. (server)
 
 ### Security
 

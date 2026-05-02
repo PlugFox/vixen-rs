@@ -106,8 +106,9 @@ fn resolve_target(msg: &Message, arg: &str) -> Option<i64> {
 }
 
 /// True if `user` is a chat administrator (creator or admin) per Telegram.
-/// Falls back to a row in `chat_moderators` if the API call fails (e.g.
-/// permissions) — both are valid moderator paths in vixen.
+/// On API failure (rate limit, permission revoked) returns `false` and logs
+/// the error — `/verify` will deny the call rather than silently elevate. M2+
+/// may add a per-chat moderator allow-list table; not in scope here.
 async fn is_moderator(
     bot: &Bot,
     chat_id: teloxide::types::ChatId,

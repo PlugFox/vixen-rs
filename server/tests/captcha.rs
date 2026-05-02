@@ -6,7 +6,7 @@
 //! the expiry job, which we cover with manual end-to-end testing.
 
 use sqlx::PgPool;
-use vixen_server::services::captcha::{CaptchaService, Fonts, Outcome};
+use vixen_server::services::captcha::{CaptchaService, Fonts, Outcome, solution_for};
 
 const CHAT_ID: i64 = -1001234567890;
 const USER_ID: i64 = 42;
@@ -41,7 +41,8 @@ async fn issue_writes_row_and_returns_image(pool: PgPool) {
         .await
         .expect("issue challenge");
 
-    assert_eq!(issued.solution.len(), 4);
+    let expected_solution = solution_for(issued.challenge_id);
+    assert_eq!(expected_solution.len(), 4);
     assert!(!issued.image_webp.is_empty());
     assert!(issued.image_webp.len() <= 30_000);
     assert_eq!(issued.attempts_left, 5);
@@ -55,7 +56,7 @@ async fn issue_writes_row_and_returns_image(pool: PgPool) {
     .await
     .expect("row exists");
     assert_eq!(row.id, issued.challenge_id);
-    assert_eq!(row.solution, issued.solution);
+    assert_eq!(row.solution, expected_solution);
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -87,8 +88,9 @@ async fn solve_correct_marks_verified(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
     let issued = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
+    let solution = solution_for(issued.challenge_id);
 
-    let outcome = svc.solve(CHAT_ID, USER_ID, &issued.solution).await.unwrap();
+    let outcome = svc.solve(CHAT_ID, USER_ID, &solution).await.unwrap();
     assert_eq!(outcome, Outcome::Solved);
 
     let verified: bool = sqlx::query_scalar(
@@ -112,7 +114,7 @@ async fn solve_correct_marks_verified(pool: PgPool) {
     assert_eq!(challenges, 0, "challenge row deleted on solve");
 
     // Idempotent re-fire — already verified.
-    let second = svc.solve(CHAT_ID, USER_ID, &issued.solution).await.unwrap();
+    let second = svc.solve(CHAT_ID, USER_ID, &solution).await.unwrap();
     assert_eq!(second, Outcome::AlreadyVerified);
 }
 
@@ -121,7 +123,7 @@ async fn solve_wrong_decrements_attempts(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
     let issued = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
-    let wrong = wrong_solution(&issued.solution);
+    let wrong = wrong_solution(&solution_for(issued.challenge_id));
 
     let r1 = svc.solve(CHAT_ID, USER_ID, &wrong).await.unwrap();
     assert_eq!(r1, Outcome::WrongLeft(4));
@@ -144,7 +146,7 @@ async fn solve_final_wrong_kicks(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
     let issued = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
-    let wrong = wrong_solution(&issued.solution);
+    let wrong = wrong_solution(&solution_for(issued.challenge_id));
 
     // Defaults: 5 attempts. The fifth wrong is the final.
     for expected in [4i16, 3, 2, 1] {
@@ -188,7 +190,10 @@ async fn solve_expired_returns_expired(pool: PgPool) {
         .await
         .unwrap();
 
-    let outcome = svc.solve(CHAT_ID, USER_ID, &issued.solution).await.unwrap();
+    let outcome = svc
+        .solve(CHAT_ID, USER_ID, &solution_for(issued.challenge_id))
+        .await
+        .unwrap();
     assert_eq!(outcome, Outcome::Expired);
 }
 
@@ -207,7 +212,7 @@ async fn concurrent_solve_picks_one_winner(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
     let svc = make_service(pool.clone());
     let issued = svc.issue_challenge(CHAT_ID, USER_ID).await.unwrap();
-    let solution = issued.solution.clone();
+    let solution = solution_for(issued.challenge_id);
 
     let svc1 = svc.clone();
     let svc2 = svc.clone();

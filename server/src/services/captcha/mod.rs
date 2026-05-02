@@ -11,5 +11,5 @@ pub mod state;
 pub use fonts::Fonts;
 pub use keyboard::{OP_BACKSPACE, OP_REFRESH, ParsedCallback, digit_pad, parse_callback, short_id};
 pub use render::render_webp;
-pub use service::{CaptchaService, IssuedChallenge, Outcome};
+pub use service::{CaptchaService, IssuedChallenge, Outcome, solution_for};
 pub use state::{CaptchaState, MetaPayload, VERIFIED_CACHE_TTL_SECS};
