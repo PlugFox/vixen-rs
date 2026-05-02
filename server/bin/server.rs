@@ -73,6 +73,9 @@ async fn main() -> anyhow::Result<()> {
     db.health_check().await.context("postgres health")?;
     info!("postgres connected");
 
+    db.migrate().await.context("apply pending migrations")?;
+    info!("postgres migrations applied");
+
     let redis = Arc::new(
         Redis::connect(config.redis_url.clone())
             .await

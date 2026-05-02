@@ -119,6 +119,7 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Changed
 
+- `bin/server.rs` now applies pending SQLx migrations on startup (right after the Postgres health check) via `Database::migrate`. The call is idempotent — SQLx tracks applied versions in `_sqlx_migrations` — so existing databases are unaffected; freshly-provisioned ones (or a dropped Docker volume in dev) come up without a separate `sqlx migrate run`. (server)
 - `bin/server.rs` now searches both `.env` and `config/.env` (in that order, first match wins) when loading the local-dev env file via `dotenvy`. Previously only `.env` in CWD was tried, which forced developers using the repo-conventional `server/config/.env` location to pass everything via CLI flags. (server)
 - `AppState` gains `spam: Arc<SpamService>` and `moderation: Arc<ModerationService>`. `bin/server.rs` constructs the `Bot` before `AppState` (M2 services capture it) and wires `CasClient` + `SpamService` + `ModerationService` into the shared state. `jobs::spawn_all` spawns `spam_cleanup` alongside `captcha_expiry`. (server)
 - `telegram::handlers::message_gate` now runs `state.spam.inspect()` for verified non-admin messages with body text. Non-`Allow` verdicts are dispatched through `state.moderation.apply()`. The captcha gate (unverified non-admin path) is unchanged. Pipeline failures are logged at `warn!` but do not block the conversation — captcha is the hard guarantee, spam is defense in depth. (server)
