@@ -85,8 +85,18 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
   without corpus samples fails the test. (server)
 - `teloxide_tests = "0.2"` dev-dependency (the last release targeting
   teloxide 0.13). Used by `tests/moderation_service.rs` for `MockBot` +
-  recorded API call assertions; future M3+ handler tests can build on the
-  same harness without re-doing scaffolding. (server)
+  recorded API call assertions. Handler-level integration suites built on
+  the same harness: `tests/handlers_ban.rs` (5 tests — `/ban`/`/unban`
+  reply-mode, id-mode, permission denial, idempotency),
+  `tests/handlers_member_update.rs` (4 tests — fresh-join captcha,
+  already-verified skip, owner-join skip, role-change skip),
+  `tests/handlers_message_gate.rs` (3 tests — unverified delete + captcha,
+  live-challenge skip-reissue, verified-user spam delete),
+  `tests/handlers_captcha_callback.rs` (5 tests — digit press, correct
+  solve, wrong solve, ownership rejection, backspace).
+  `tests/common/mod.rs` ships shared helpers (`make_state`, seeding,
+  `unique_chat_id`, `unique_message_id`) so each suite stays focused on
+  the behaviour it asserts. (server)
 - `CONFIG_CAS_BASE_URL` (default `https://api.cas.chat`) — testable CAS
   endpoint override. `CONFIG_SPAM_RETENTION_DAYS` (default 14) — spam
   message retention window. (server)

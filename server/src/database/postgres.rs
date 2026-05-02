@@ -48,6 +48,13 @@ impl Database {
         &self.pool
     }
 
+    /// Wrap an externally-owned pool. Used by `#[sqlx::test]` integration tests
+    /// that need an `AppState` but get their `PgPool` from sqlx's per-test DB
+    /// fixture rather than from `Self::connect`.
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     /// Cheap liveness probe used by `/health`. Acquires a connection and runs
     /// `SELECT 1`. Subject to the pool's `acquire_timeout`.
     pub async fn health_check(&self) -> Result<(), sqlx::Error> {
