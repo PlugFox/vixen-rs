@@ -14,20 +14,29 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const REDIS_URL: &str = "redis://localhost:6379/15";
 
-async fn fresh_redis() -> Arc<Redis> {
+/// Connect to Redis and DEL the `cas:{user_id}` key for every user id this
+/// test will touch. We deliberately do NOT `FLUSHDB`: cargo runs tests in
+/// the same file in parallel by default, and a global flush from one test
+/// would race with another test's primed state. Each test uses a distinct
+/// `user_id` so per-key clears never collide.
+async fn redis_with_clean_keys(user_ids: &[i64]) -> Arc<Redis> {
     let r = Redis::connect(REDIS_URL).await.expect("redis connect");
     let mut conn = r.pool().get().await.expect("pool acquire");
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut *conn)
-        .await
-        .expect("flushdb");
+    for uid in user_ids {
+        let key = format!("cas:{uid}");
+        let _: () = redis::cmd("DEL")
+            .arg(&key)
+            .query_async(&mut *conn)
+            .await
+            .expect("DEL cas key");
+    }
     Arc::new(r)
 }
 
 #[tokio::test]
 #[ignore = "requires redis://localhost:6379"]
 async fn flagged_lookup_caches_after_first_hit() {
-    let redis = fresh_redis().await;
+    let redis = redis_with_clean_keys(&[42]).await;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/check"))
@@ -57,7 +66,7 @@ async fn flagged_lookup_caches_after_first_hit() {
 #[tokio::test]
 #[ignore = "requires redis://localhost:6379"]
 async fn clean_lookup_is_cached_too() {
-    let redis = fresh_redis().await;
+    let redis = redis_with_clean_keys(&[7]).await;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/check"))
@@ -79,7 +88,7 @@ async fn clean_lookup_is_cached_too() {
 #[tokio::test]
 #[ignore = "requires redis://localhost:6379"]
 async fn http_5xx_is_fail_open_and_not_cached() {
-    let redis = fresh_redis().await;
+    let redis = redis_with_clean_keys(&[99]).await;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/check"))
@@ -107,7 +116,7 @@ async fn redis_tier_serves_after_moka_eviction() {
     // Prove the Redis tier works: prime Redis directly, then call lookup
     // against a CAS server that returns 502 — if Moka were the only cache,
     // we'd fail-open Clean; instead we read the primed Flagged from Redis.
-    let redis = fresh_redis().await;
+    let redis = redis_with_clean_keys(&[777]).await;
     {
         let mut conn = redis.pool().get().await.unwrap();
         let _: () = conn.set("cas:777", "flagged").await.unwrap();

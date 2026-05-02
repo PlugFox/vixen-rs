@@ -7,13 +7,17 @@
 //! - **Unverified non-admin users** → delete + issue captcha (M1 policy:
 //!   never restrict or kick; the user always gets another shot).
 //!
-//! Order of checks is fastest-first:
+//! Order of checks:
 //!
-//! 1. `verified_users` — Redis cache, then PG. Most healthy-chat messages
+//! 1. Chat admins — Redis cache, fallback to `get_chat_administrators` on
+//!    miss with 6h TTL. Admins bypass everything (captcha and spam pipeline)
+//!    — they wouldn't post spam, the bot can't restrict them anyway, and
+//!    deleting an admin's "buy now" mention because of an n-gram match
+//!    would be a worse outcome than missing one. Doing the admin check
+//!    BEFORE the verified check costs one Redis lookup per message but
+//!    guarantees a verified admin can't accidentally trip `spam.inspect`.
+//! 2. `verified_users` — Redis cache, then PG. Most healthy-chat messages
 //!    hit this; on hit we run the spam pipeline and return.
-//! 2. Chat admins — Redis cache, fallback to `get_chat_administrators` on
-//!    miss with 6h TTL. Admins skip the spam pipeline (they wouldn't post
-//!    spam, and the bot can't ban them anyway).
 //! 3. Otherwise: delete the message; if no live challenge → issue + send;
 //!    if a live challenge already exists → just delete (don't spam the chat
 //!    with multiple captcha photos for one user).
@@ -48,11 +52,11 @@ pub async fn handle(bot: Bot, msg: Message, state: AppState) -> Result<()> {
     let user_id = user.id;
     let uid = user_id.0 as i64;
 
-    if is_verified(&state, chat_id.0, uid).await {
-        run_spam_pipeline(&state, &msg, chat_id.0, uid).await;
+    if is_chat_admin(&bot, &state, chat_id.0, uid).await {
         return Ok(());
     }
-    if is_chat_admin(&bot, &state, chat_id.0, uid).await {
+    if is_verified(&state, chat_id.0, uid).await {
+        run_spam_pipeline(&state, &msg, chat_id.0, uid).await;
         return Ok(());
     }
 
@@ -107,6 +111,7 @@ async fn issue_and_post(
         .send_photo(chat_id, photo)
         .caption(caption)
         .reply_markup(issued.keyboard)
+        .protect_content(true)
         .await
     {
         Ok(m) => m,

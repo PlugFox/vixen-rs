@@ -134,6 +134,7 @@ The flow itself is identical in both call sites:
 3. let msg = bot.send_photo(chat_id, InputFile::memory(issued.image_webp))
                 .caption(caption_initial(&mention, issued.attempts_left))
                 .reply_markup(issued.keyboard)
+                .protect_content(true) // no forwarding/copying/saving
                 .await?;
 4. state.captcha.record_message_id(chat_id, user_id, msg.id.0).await?;
 5. state.captcha_state.set_meta(chat_id, msg.id.0, user_id, &short, lifetime).await?;

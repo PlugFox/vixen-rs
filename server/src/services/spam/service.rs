@@ -93,8 +93,13 @@ impl SpamService {
         };
 
         let normalized = normalize::normalize(text);
-        if normalized.len() < MIN_NORMALIZED_LEN {
-            debug!(len = normalized.len(), "skipping (short)");
+        // Char count, not byte length — Cyrillic et al. are 2+ bytes per
+        // codepoint in UTF-8, and a byte-length cutoff would short-circuit
+        // around 24 chars for Russian, well below the 48-char threshold the
+        // pipeline is documented to use.
+        let normalized_chars = normalized.chars().count();
+        if normalized_chars < MIN_NORMALIZED_LEN {
+            debug!(chars = normalized_chars, "skipping (short)");
             return Ok(Verdict::Allow);
         }
 

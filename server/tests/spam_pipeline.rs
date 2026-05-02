@@ -1,9 +1,11 @@
 //! Spam-pipeline corpus walker.
 //!
-//! Loads every YAML in `tests/spam_corpus/` and runs each sample through
+//! `corpus_walks_all_yaml_files` actually iterates every `*.yaml` under
+//! `tests/spam_corpus/` and runs each labelled sample through
 //! `SpamService::inspect`. Adding a new rule means: (a) implement it in the
 //! cascade, (b) drop a labelled YAML alongside, (c) run `cargo test --test
-//! spam_pipeline`. A misclassification fails the test and blocks merge.
+//! spam_pipeline -- --include-ignored`. A misclassification fails the test
+//! and blocks merge — no per-file boilerplate needed.
 //!
 //! `#[ignore]`-gated because the pipeline needs Postgres + Redis; CI's
 //! `integration` job runs `--include-ignored`.
@@ -26,9 +28,19 @@ const REDIS_URL: &str = "redis://localhost:6379/14";
 #[derive(Default, Debug, Deserialize)]
 #[serde(default)]
 struct CorpusFile {
+    /// Each sample MUST yield `Verdict::Ban` on the first call. The harness
+    /// pre-seeds `spam_messages` with the sample's xxh3 so the dedup branch
+    /// fires deterministically — use this for samples that should be banned
+    /// without depending on CAS.
     must_ban: Vec<String>,
+    /// Each sample MUST yield `Verdict::Delete` on the first call (n-gram
+    /// match without a dedup hit).
     must_delete: Vec<String>,
+    /// Each sample MUST yield `Verdict::Allow` (clean text or below the
+    /// MIN_NORMALIZED_LEN threshold).
     must_allow: Vec<String>,
+    /// First call MUST yield `Verdict::Delete` (records the hash); second
+    /// call from a different user MUST yield `Verdict::Ban` via dedup.
     must_ban_after_first: Vec<String>,
 }
 
@@ -60,14 +72,12 @@ async fn seed_chat(pool: &PgPool, chat_id: i64) {
     .expect("seed chat_config");
 }
 
-async fn fresh_redis() -> Arc<Redis> {
-    let r = Redis::connect(REDIS_URL).await.expect("redis connect");
-    let mut conn = r.pool().get().await.expect("pool acquire");
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut *conn)
-        .await
-        .expect("flushdb");
-    Arc::new(r)
+/// Connect to Redis. We deliberately do NOT `FLUSHDB`: the corpus tests force
+/// `cas_enabled = FALSE` in chat_config, so the spam pipeline never touches
+/// Redis. A global flush would have been racy with parallel test execution
+/// inside this file.
+async fn redis() -> Arc<Redis> {
+    Arc::new(Redis::connect(REDIS_URL).await.expect("redis connect"))
 }
 
 fn mock_message_with_text(chat_id: i64, user_id: u64, text: &str) -> Message {
@@ -88,80 +98,124 @@ fn rand_message_id() -> i32 {
 }
 
 async fn make_service(pool: PgPool) -> SpamService {
-    let redis = fresh_redis().await;
+    let redis = redis().await;
     // Base URL is unused once cas_enabled is FALSE in chat_config — the
     // CAS branch never runs, so we can pass any string.
     let cas = CasClient::new(redis, "http://localhost:0".to_string());
     SpamService::new(pool, cas)
 }
 
-// ── per-corpus tests ─────────────────────────────────────────────────────
-
-#[sqlx::test(migrations = "./migrations")]
-#[ignore = "requires postgres + redis"]
-async fn corpus_phrase_match(pool: PgPool) {
-    seed_chat(&pool, CHAT_ID).await;
-    let svc = make_service(pool).await;
-    let corpus = load_corpus(&corpus_dir().join("phrase_match.yaml"));
-
-    for sample in &corpus.must_delete {
-        let msg = mock_message_with_text(CHAT_ID, USER_ID, sample);
-        let v = svc.inspect(&msg).await.expect("inspect");
-        assert!(
-            matches!(v, Verdict::Delete { .. }),
-            "expected Delete, got {v:?} for sample: {sample:?}"
-        );
-    }
-
-    for sample in &corpus.must_allow {
-        let msg = mock_message_with_text(CHAT_ID, USER_ID, sample);
-        let v = svc.inspect(&msg).await.expect("inspect");
-        assert!(
-            matches!(v, Verdict::Allow),
-            "expected Allow, got {v:?} for sample: {sample:?}"
-        );
-    }
+/// Wipe the global `spam_messages` table between samples. The table has no
+/// chat_id column, so without this every prior `must_delete`/`must_ban`
+/// sample's hash would prime dedup and skew later assertions.
+async fn reset_spam_messages(pool: &PgPool) {
+    sqlx::query("DELETE FROM spam_messages")
+        .execute(pool)
+        .await
+        .expect("DELETE spam_messages");
 }
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires postgres + redis"]
-async fn corpus_clean_messages(pool: PgPool) {
+async fn corpus_walks_all_yaml_files(pool: PgPool) {
     seed_chat(&pool, CHAT_ID).await;
-    let svc = make_service(pool).await;
-    let corpus = load_corpus(&corpus_dir().join("clean_messages.yaml"));
+    let svc = make_service(pool.clone()).await;
 
-    for sample in &corpus.must_allow {
-        let msg = mock_message_with_text(CHAT_ID, USER_ID, sample);
-        let v = svc.inspect(&msg).await.expect("inspect");
-        assert!(
-            matches!(v, Verdict::Allow),
-            "expected Allow, got {v:?} for clean sample: {sample:?}"
-        );
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(corpus_dir())
+        .expect("read corpus_dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("yaml"))
+        .collect();
+    paths.sort();
+    assert!(
+        !paths.is_empty(),
+        "no .yaml files under {}",
+        corpus_dir().display()
+    );
+
+    for path in &paths {
+        let corpus = load_corpus(path);
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+
+        for sample in &corpus.must_allow {
+            reset_spam_messages(&pool).await;
+            let v = svc
+                .inspect(&mock_message_with_text(CHAT_ID, USER_ID, sample))
+                .await
+                .expect("inspect must_allow");
+            assert!(
+                matches!(v, Verdict::Allow),
+                "{name}: must_allow {sample:?} returned {v:?}"
+            );
+        }
+
+        for sample in &corpus.must_delete {
+            reset_spam_messages(&pool).await;
+            let v = svc
+                .inspect(&mock_message_with_text(CHAT_ID, USER_ID, sample))
+                .await
+                .expect("inspect must_delete");
+            assert!(
+                matches!(v, Verdict::Delete { .. }),
+                "{name}: must_delete {sample:?} returned {v:?}"
+            );
+        }
+
+        for sample in &corpus.must_ban {
+            // Pre-seed the dedup table with the sample's hash so the first
+            // pass returns Ban via the dedup branch — without this, must_ban
+            // would only fire if CAS were enabled (it isn't, in this suite).
+            reset_spam_messages(&pool).await;
+            seed_dedup(&pool, sample).await;
+            let v = svc
+                .inspect(&mock_message_with_text(CHAT_ID, USER_ID, sample))
+                .await
+                .expect("inspect must_ban");
+            assert!(
+                matches!(v, Verdict::Ban { .. }),
+                "{name}: must_ban {sample:?} returned {v:?}"
+            );
+        }
+
+        for sample in &corpus.must_ban_after_first {
+            reset_spam_messages(&pool).await;
+            let v1 = svc
+                .inspect(&mock_message_with_text(CHAT_ID, USER_ID, sample))
+                .await
+                .expect("inspect must_ban_after_first first");
+            assert!(
+                matches!(v1, Verdict::Delete { .. }),
+                "{name}: must_ban_after_first {sample:?} first call returned {v1:?}"
+            );
+            let v2 = svc
+                .inspect(&mock_message_with_text(CHAT_ID, USER_ID + 1, sample))
+                .await
+                .expect("inspect must_ban_after_first second");
+            assert!(
+                matches!(v2, Verdict::Ban { .. }),
+                "{name}: must_ban_after_first {sample:?} second call returned {v2:?}"
+            );
+        }
     }
 }
 
-#[sqlx::test(migrations = "./migrations")]
-#[ignore = "requires postgres + redis"]
-async fn corpus_xxh3_dedup_second_pass_bans(pool: PgPool) {
-    seed_chat(&pool, CHAT_ID).await;
-    let svc = make_service(pool).await;
-    let corpus = load_corpus(&corpus_dir().join("xxh3_dedup.yaml"));
-
-    for sample in &corpus.must_ban_after_first {
-        let msg1 = mock_message_with_text(CHAT_ID, USER_ID, sample);
-        let v1 = svc.inspect(&msg1).await.expect("inspect first");
-        assert!(
-            matches!(v1, Verdict::Delete { .. }),
-            "first pass should Delete (n-gram), got {v1:?} for: {sample:?}"
-        );
-
-        let msg2 = mock_message_with_text(CHAT_ID, USER_ID + 1, sample);
-        let v2 = svc.inspect(&msg2).await.expect("inspect second");
-        assert!(
-            matches!(v2, Verdict::Ban { .. }),
-            "second pass should Ban (dedup), got {v2:?} for: {sample:?}"
-        );
-    }
+/// Pre-seed `spam_messages` with the normalized hash of `sample`, so the
+/// dedup branch fires on the next inspect call. Mirrors what the n-gram /
+/// CAS branches would have written on a real first-pass hit.
+async fn seed_dedup(pool: &PgPool, sample: &str) {
+    use vixen_server::services::spam::normalize::normalize;
+    use xxhash_rust::xxh3::xxh3_64;
+    let normalized = normalize(sample);
+    let hash = xxh3_64(normalized.as_bytes()) as i64;
+    sqlx::query(
+        "INSERT INTO spam_messages (xxh3_hash, sample_body) VALUES ($1, $2)
+         ON CONFLICT (xxh3_hash) DO NOTHING",
+    )
+    .bind(hash)
+    .bind(&normalized)
+    .execute(pool)
+    .await
+    .expect("seed spam_messages");
 }
 
 #[sqlx::test(migrations = "./migrations")]

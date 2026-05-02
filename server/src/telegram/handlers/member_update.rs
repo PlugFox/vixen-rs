@@ -70,6 +70,7 @@ pub async fn handle(bot: Bot, event: ChatMemberUpdated, state: AppState) -> Resu
         .send_photo(chat_id, photo)
         .caption(caption)
         .reply_markup(issued.keyboard)
+        .protect_content(true)
         .await;
 
     match send_result {

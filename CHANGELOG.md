@@ -11,8 +11,31 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Security
+
+- captcha photo is sent with `protect_content=true`, blocking forwarding,
+  copying and saving by chat members. The image was previously forwardable
+  to other chats, where the same `vc:{short}:{op}` callback buttons would
+  still ping our bot — only the meta ownership / `short` checks rejected
+  them, but the message itself stayed visible everywhere it was reposted.
+  (server)
+
 ### Fixed
 
+- spam pipeline's `MIN_NORMALIZED_LEN = 48` cutoff now compares character
+  count, not byte length. Previously `normalized.len()` short-circuited
+  Cyrillic messages around 24 chars (UTF-8 codepoints are 2+ bytes), which
+  meant Russian text triggered dedup / CAS / n-gram inspection at half the
+  documented threshold. (server)
+- `PhraseSet::matches` now returns matched phrases in lexicographic order
+  rather than `HashSet` iteration order. The output lands in the
+  `moderation_actions.reason` JSON, where a non-deterministic order would
+  produce noisy diffs in the audit/replay UI. (server)
+- chat admins now bypass the spam pipeline as documented. The previous
+  ordering ran the spam cascade for any verified user before the admin
+  check, so a verified admin posting an n-gram phrase (e.g. promoting
+  their own service) would have their message deleted. The admin check
+  now happens before the verified fast-path in `message_gate`. (server)
 - moderation ledger no longer rolls back the row outside of a transaction after
   a fatal Telegram failure. `ModerationService::apply` now performs the INSERT,
   the bot call, and the COMMIT inside one tx; a fatal bot error rolls back the
@@ -32,8 +55,22 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 - chat-admin Redis cache write in `/ban` / `/unban` / `/verify` now filters
   `Banned` / `Left` admins, matching the `message_gate` filter. Stale
   ex-admin ids can no longer leak into the cache via the command path. (server)
+- integration tests in `tests/spam_pipeline.rs` and `tests/cas_client.rs`
+  no longer `FLUSHDB` a shared Redis index. Cargo runs tests in the same
+  file in parallel by default, and the global flush would race with another
+  test's primed state — the corpus suite force-disables CAS so it doesn't
+  touch Redis at all (no clear needed), and the CAS suite now `DEL`s only
+  the per-test `cas:{user_id}` keys it owns. (server)
 
 ### Changed
+
+- spam corpus harness rewritten as a directory walker. `tests/spam_pipeline.rs`
+  now actually iterates every `*.yaml` under `tests/spam_corpus/` and runs
+  every labelled sample through `SpamService::inspect`. Adding a new corpus
+  is drop-in: a new file under `tests/spam_corpus/` is auto-discovered on
+  next run, no per-file `#[test]` boilerplate. The harness `DELETE FROM
+  spam_messages` between every individual sample so dedup state from one
+  sample can't bleed into the next. (server)
 
 - captcha message captions redesigned for clarity. The progress mask now shows
   the digits the user has actually typed (keycap emoji `1️⃣` for filled slots,

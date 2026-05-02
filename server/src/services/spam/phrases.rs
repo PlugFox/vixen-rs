@@ -203,14 +203,20 @@ impl PhraseSet {
         self.phrases.is_empty()
     }
 
-    /// Returns the list of phrases that appear as substrings of `normalized`.
-    /// Order is unspecified.
+    /// Returns the list of phrases that appear as substrings of `normalized`,
+    /// sorted lexicographically. Sorting matters: the result lands in the
+    /// `moderation_actions.reason` JSON, which is shown in audit/replay UIs
+    /// and may be diff'd or hashed by downstream consumers — a `HashSet`
+    /// iteration order would shuffle between processes for the same input.
     pub fn matches(&self, normalized: &str) -> Vec<&'static str> {
-        self.phrases
+        let mut out: Vec<&'static str> = self
+            .phrases
             .iter()
             .filter(|p| normalized.contains(*p))
             .copied()
-            .collect()
+            .collect();
+        out.sort_unstable();
+        out
     }
 
     /// Sum of per-phrase weights of every matched phrase, plus the matched
@@ -286,6 +292,22 @@ mod tests {
         let (score, matched) = PHRASES.score("hello world how are you", &w);
         assert!(matched.is_empty());
         assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn matches_returned_in_stable_order() {
+        // The same input must produce the same matched-phrase order across
+        // calls — `reason_json["ngram_phrases"]` is read by the audit UI and
+        // may be diff'd. Repeat the query a few times to defeat a single
+        // happy-path HashSet iteration.
+        let body = "click here for the best price — buy now and act now today";
+        let runs: Vec<Vec<&'static str>> = (0..8).map(|_| PHRASES.matches(body)).collect();
+        for w in runs.windows(2) {
+            assert_eq!(w[0], w[1], "matches() order is not stable");
+        }
+        let mut sorted = runs[0].clone();
+        sorted.sort_unstable();
+        assert_eq!(runs[0], sorted, "matches() should be sorted");
     }
 
     #[test]
