@@ -14,6 +14,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use super::fonts::Fonts;
 use super::keyboard::digit_pad;
 use super::render::render_webp;
+use crate::models::daily_stats::{self, Metric};
 
 const SOLUTION_LEN: usize = 4;
 const DEFAULT_ATTEMPTS: i16 = 5;
@@ -125,6 +126,12 @@ impl CaptchaService {
         .context("INSERT captcha_challenges")?;
 
         let bytes = self.render(row.id, &solution).await?;
+        // Best-effort counter bump — a failure here logs and continues; the
+        // captcha row itself is already committed above.
+        if let Err(e) = daily_stats::increment(&self.pool, chat_id, Metric::CaptchaIssued, 1).await
+        {
+            tracing::warn!(error = ?e, "daily_stats captcha_issued bump failed");
+        }
         Ok(IssuedChallenge {
             challenge_id: row.id,
             image_webp: bytes,
@@ -260,6 +267,7 @@ impl CaptchaService {
             )
             .execute(&mut *tx)
             .await?;
+            daily_stats::increment(&mut *tx, chat_id, Metric::CaptchaExpired, 1).await?;
             tx.commit().await?;
             return Ok(Outcome::Expired);
         }
@@ -296,6 +304,8 @@ impl CaptchaService {
             )
             .execute(&mut *tx)
             .await?;
+            daily_stats::increment(&mut *tx, chat_id, Metric::CaptchaSolved, 1).await?;
+            daily_stats::increment(&mut *tx, chat_id, Metric::UsersVerified, 1).await?;
             tx.commit().await?;
             return Ok(Outcome::Solved);
         }
@@ -405,6 +415,7 @@ impl CaptchaService {
         )
         .execute(&mut *tx)
         .await?;
+        daily_stats::increment(&mut *tx, chat_id, Metric::UsersVerified, 1).await?;
 
         tx.commit().await?;
         Ok(Outcome::Solved)

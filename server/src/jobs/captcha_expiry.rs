@@ -26,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
+use crate::models::daily_stats::{self, Metric};
 
 pub const NAME: &str = "captcha_expiry";
 pub const INTERVAL: Duration = Duration::from_secs(60);
@@ -142,5 +143,6 @@ async fn ledger_expired(pool: &PgPool, row: &ExpiredRow) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    daily_stats::increment(pool, row.chat_id, Metric::CaptchaExpired, 1).await?;
     Ok(())
 }

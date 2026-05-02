@@ -1,133 +1,147 @@
-# Daily Reports
+# Daily Reports (M3)
 
-A summary of the previous 24h is posted into each watched chat at `CONFIG_REPORT_HOUR` (default 17:00). Optional AI-generated narrative summary is appended when OpenAI is configured.
+Each watched chat receives a daily report at the configured hour: a MarkdownV2 message with pseudographics + counts + top phrases, plus a WebP chart message with an optional AI summary as caption.
 
-## Aggregates
+The report is **per-chat**: every tunable lives in `chat_config` and can differ across chats.
 
-For each chat, the previous-24h window:
-
-- `messages_seen` — count of `allowed_messages` rows (if `chat_config.log_allowed_messages = true`); otherwise extracted from `daily_stats(... 'message')` running counter.
-- `messages_deleted` — `moderation_actions WHERE action = 'delete'`.
-- `users_verified` — `moderation_actions WHERE action = 'verify'` (incl. captcha solves).
-- `users_banned` — `moderation_actions WHERE action = 'ban'`.
-- `captcha_attempts` — `daily_stats(... 'captcha_attempt')`.
-- `top_spam_phrases` — top-5 `spam_messages` by `hit_count` updated in the window (sample text + count).
-
-Stored as `daily_stats(chat_id, date, kind, value BIGINT)` for cheap re-aggregation.
-
-## Chart
-
-`plotters` renders a stacked bar chart, 24 hourly buckets:
-
-- Bar 1: `allowed_messages` (greenish)
-- Bar 2: `moderation_actions WHERE action = 'delete'` (red)
-- Bar 3: `moderation_actions WHERE action = 'ban'` (dark red)
-- Bar 4: captcha attempts (blue)
-
-Output: PNG, 1200×630 (also serves as OG image for the public report).
-
-`spawn_blocking` for the rendering — plotters is CPU work.
-
-## Posting
-
-```rust
-let chart_png = report_service::render_chart(chat_id, &stats).await?;
-let caption = report_service::format_caption(&stats, &locale);
-let msg = bot.send_photo(chat_id, InputFile::memory(chart_png).file_name("report.png"))
-    .caption(caption)
-    .parse_mode(ParseMode::MarkdownV2)
-    .await?;
-sqlx::query!(
-    "INSERT INTO report_messages (chat_id, telegram_message_id, generated_at, kind)
-     VALUES ($1, $2, NOW(), 'daily')
-     ON CONFLICT (chat_id, kind) DO UPDATE SET telegram_message_id = $2, generated_at = NOW()
-     RETURNING (xmax = 0) AS inserted",
-    chat_id, msg.id.0
-).fetch_one(&pool).await?;
-```
-
-If a previous day's report message ID is in `report_messages`, delete it first (`bot.delete_message(chat_id, prev_msg_id)`) — keeps the chat clean. The dashboard can also trigger a "redo report" that does this on demand.
-
-## Caption format
-
-Locale-aware (RU / EN), MarkdownV2:
+## Pipeline
 
 ```
-📊 *Vixen — Daily Report*  ({date})
-
-Messages: {messages_seen} · Deleted: {messages_deleted} · Captcha attempts: {captcha_attempts}
-Verified: {users_verified} · Banned: {users_banned}
-
-Top users:
-1. {name1} — {count1}
-2. ...
-
-(AI summary, if enabled, appended below)
+daily_report job (5-min ticker)
+  ├─► fetch chat_config (report_hour, timezone, report_min_activity, language, summary_enabled)
+  ├─► is current chat-local time within ±5min of report_hour ? continue : skip
+  ├─► already_posted_today(chat_id, report_date) ? skip
+  ├─► report_service.aggregate(chat_id, day_window_utc(report_date))
+  │     ├─► daily_stats SUM (messages_seen, captcha_*, openai_tokens_used)
+  │     ├─► moderation_actions COUNT (delete, ban, verify) for the window
+  │     ├─► spam_messages ORDER BY hit_count DESC LIMIT 10  (top phrases)
+  │     └─► daily_stats[messages_seen] for last 7 days       (sparkline)
+  ├─► report.messages_seen < min_activity ? skip
+  ├─► delete prior report_messages (best-effort) + DROP rows for today
+  ├─► bot.send_message(MarkdownV2)               → record(daily_text)
+  └─► bot.send_photo(WebP)
+        caption = summary_service.summarize(...) if summary_enabled, else None
+        record(daily_photo)
 ```
 
-User mentions in "Top users" are escaped properly per MarkdownV2 (the helper is in `utils/escape.rs`).
+## Aggregator (`services/report_service.rs`)
 
-## Optional OpenAI summary
+`aggregate(chat_id, from, to) -> ReportData` — pure-DB, one SQL per metric, no N+1.
 
-Gated by `CONFIG_OPENAI_KEY` AND `chat_config.summary_enabled = true` AND `daily_stats(... 'openai_tokens')` < `chat_config.summary_token_budget`.
+- `messages_seen`, `captcha_{issued,solved,expired}` — `SUM(value)` on `daily_stats(chat_id, date, kind)`.
+- `messages_deleted`, `users_banned`, `users_verified` — `COUNT(*)` on `moderation_actions` keyed by `(chat_id, action, [from, to))`.
+- `top_phrases` — `spam_messages` joined to the window via `last_seen`, ordered by `hit_count DESC, last_seen DESC`, limit 10.
+- `last_7_days_messages` — last 7 calendar days of `messages_seen`, oldest first, missing days zero-padded.
 
-Pipeline:
+The aggregator also resolves `chat_title` from `chat_info_cache`.
 
-1. Pull last-24h `allowed_messages.content` from the chat (limit ~2000 messages).
-2. **Sanitize**: strip @mentions (`@\w+`), strip phone-like sequences (`+?\d{7,}`), strip URLs (replace with `[link]`).
-3. POST to OpenAI Chat Completions API (`gpt-4o-mini` default, configurable):
-   ```
-   model: CONFIG_OPENAI_MODEL
-   messages: [
-     {"role": "system", "content": "Summarize this chat into 3-5 short bullet points in {locale}. Focus on topics, not individuals."},
-     {"role": "user", "content": "<sanitized messages>"}
-   ]
-   max_tokens: 500
-   ```
-4. Append the response text to the report caption (or as a separate message if it doesn't fit).
-5. Increment `daily_stats(... 'openai_tokens')` by the API's reported token usage.
+> Note: `top_phrases` is **global** — `spam_messages` is xxh3-keyed, not chat-scoped. Until M6 ships the redaction helper, the renderer emits raw match samples. The audit-only `moderation_actions.reason` JSON keeps full detail.
 
-## Per-chat token budget
+## Renderer (`services/report_render.rs`)
 
-`chat_config.summary_token_budget INTEGER NOT NULL DEFAULT 50000` (per day). When today's accumulated token usage hits the budget, the summary is skipped for the rest of the day and a one-line note is added to the caption ("AI summary skipped — daily budget reached"). Resets at chat-local midnight.
+`render(report, lang, header) -> String` — pure function, MarkdownV2-escaped output. Sections:
 
-This is a hard cap — there's no "soft warning" path. If the budget is too tight, moderators raise it in the dashboard.
+- **Header** — chat title (escaped) + ISO-ish UTC window.
+- **Counts block** — `Сообщений / Удалено / Верифицировано / Забанено`, each with an inline 7-cell bar (8-step Unicode blocks `▁▂▃▄▅▆▇█`).
+- **Captcha block** — issued / solved / expired (omitted when total = 0).
+- **Top phrases** — rendered iff non-empty, samples truncated to 60 chars.
+- **7-day sparkline** — one line of block characters, day-of-week row underneath. Omitted when the entire week is zero.
 
-## Scheduling
+`HeaderKind` switches the title:
 
-`daily_report` job per chat. Wakes up at chat-local `CONFIG_REPORT_HOUR` (NOT a single global tick — different chats can have different report hours and timezones in `chat_config.timezone`).
+| Kind | Title (RU) | Used by |
+|---|---|---|
+| `Daily` | "Ежедневный отчёт" | `daily_report` job |
+| `Last24h` | "Сводка за 24 часа" | `/stats` |
+| `OnDemand` | "Отчёт по запросу" | `/report` |
 
-The job uses `chrono::Local` math + `tokio::time::sleep_until` to fire on a wall-clock schedule. `tokio::time::interval` would drift.
+`Lang::{Ru, En}` chooses the locale; `chat_config.language` is the source.
 
-Idempotency: the job checks `report_messages WHERE chat_id = $1 AND kind = 'daily' AND generated_at::date = current_date` before firing. A re-run on the same day no-ops unless the `--force-redo` admin endpoint is used.
+A worked sample is in [`reports/sample.md`](reports/sample.md).
 
-## On-demand "regenerate report"
+## Chart (`services/chart_service.rs`)
 
-`POST /api/v1/chats/{chat_id}/reports/regenerate` (moderator-only) deletes the current `report_messages` row and re-runs the same flow immediately. Dashboard exposes a "Redo today's report" button.
+`render(report) -> Vec<u8>` — 480×270 lossless WebP, same geometry as the M1 captcha so Telegram doesn't tap-to-expand. Two stacked panels:
 
-## Public report
+1. **Counts** — bars for messages / deleted / verified / banned / captcha solved / expired.
+2. **Last 7 days** — daily messages_seen.
 
-`GET /report/{chat_slug}` and `GET /report/{chat_slug}/chart.png` are unauthenticated and serve the **same data** as the in-chat report, with usernames stripped:
+Plotters' `BitMapBackend` writes RGB into an in-memory buffer; the buffer is encoded with `image::codecs::webp::WebPEncoder::new_lossless`. CPU-bound — callers wrap `render` in `spawn_blocking`. The bundled DejaVuSans is registered with plotters' `ab_glyph` backend at first call so charts render identically in dev, CI, and Docker without relying on system fonts.
 
-- "Top users" section omitted entirely.
-- Top spam phrases shown as categories, not raw text (e.g. "investment scam: 12 hits") — adds a redaction step.
-- Chart and counts unchanged.
+Asserts `bytes.len() <= 80 KiB` in the test harness; in practice we see a few KB.
 
-`chat_slug` is derived from `chats.slug` (a short URL-safe identifier set per-chat by a moderator). Chats without a slug have no public report.
+## Summary (`services/summary_service.rs`)
+
+`summarize(chat_id, from, to, language) -> SummaryOutcome::{Generated{text, tokens_used} | Skipped{reason}}`.
+
+Per-chat:
+- `chat_config.openai_api_key` — NULL → `Skipped(NoApiKey)`.
+- `chat_config.summary_enabled` — FALSE → `Skipped(Disabled)`.
+- `chat_config.openai_model` — defaults to `gpt-4o-mini`.
+- `chat_config.summary_token_budget` — when `daily_stats('openai_tokens_used')` for today ≥ budget, → `Skipped(BudgetExhausted{used, budget})`.
+- `allowed_messages` — empty → `Skipped(NoMessages)`. Filled only when `chat_config.log_allowed_messages = TRUE`.
+
+Sanitisation runs on every message body before the OpenAI POST:
+- `https?://...` → `[link]`
+- emails → `[email]`
+- `+?\d[\d\s().-]{6,}\d` → `[phone]`
+- `@username` → `[user]`
+
+The OpenAI client (`services/openai_client.rs`) retries on 429 / 5xx with exponential backoff (initial 500 ms, doubled per attempt; up to 3 attempts). A `Retry-After` header in seconds overrides the backoff (capped at 60s). Total token usage is recorded into `daily_stats('openai_tokens_used')` on success.
+
+## Replace-on-redo
+
+`report_messages` schema:
+
+```sql
+CREATE TABLE report_messages (
+    chat_id             BIGINT      NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE,
+    report_date         DATE        NOT NULL,
+    kind                TEXT        NOT NULL CHECK (kind IN ('daily_text', 'daily_photo')),
+    telegram_message_id INTEGER     NOT NULL,
+    generated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chat_id, report_date, kind)
+);
+```
+
+Re-running on the same `report_date` is the dashboard "redo report" path:
+
+1. `prior_today(chat_id, report_date)` returns the existing pair.
+2. Bot `delete_message` each (best-effort — failure on either is logged).
+3. `delete_for_day` clears the rows.
+4. Send fresh text + photo, `record` each.
+
+This keeps the chat free of historical "v1, v2, v3" pairs and matches the
+moderator's mental model of "today's report".
+
+## /stats / /report / /summary
+
+Slash commands (`telegram/handlers/commands.rs`):
+
+| Command | Window | Cooldown | Posts | Notes |
+|---|---|---|---|---|
+| `/stats`   | last 24h | 60s | text | moderator-only |
+| `/report`  | today (chat-local) | — | text + chart + summary caption | moderator-only; replaces today's prior pair |
+| `/summary` | last 24h | 60s | text | moderator-only; replies with skip reason if OpenAI key missing or disabled |
+
+Cooldowns use `SET NX EX` on Redis key `cmd:{stats,summary}:{chat_id}`.
 
 ## Failure modes
 
 | Failure | Effect | Recovery |
 |---|---|---|
-| Aggregation query slow | Job tick goes long | Add an index, partition `daily_stats` by date if it grows |
-| `bot.send_photo` fails (Telegram down) | No message posted, no `report_messages` row written | Job re-tries on next day's tick; missed day shows nothing |
-| OpenAI API errors / timeouts | Summary skipped, caption noted | Token budget unchanged; report still posts |
-| OpenAI budget exhausted mid-day | Summary skipped | Dashboard surfaces budget usage; moderator raises if needed |
+| `bot.send_message` fails | report_messages row not written → next 5-min tick re-fires | Idempotent by design |
+| `bot.send_photo` fails after text sent | Text stays, photo retried next tick (text replaced) | Idempotent by `(chat_id, report_date, kind)` UPSERT |
+| OpenAI 429 / 5xx within retry budget | Backoff + retry up to 3 attempts, `Retry-After` honoured | Surfaces error if exhausted; report still posts without summary caption |
+| OpenAI budget exhausted mid-day | `Skipped(BudgetExhausted)`; report posts without caption | Moderator raises `chat_config.summary_token_budget` |
+| Invalid `chat_config.timezone` | Job logs `warn` and skips that chat for the tick | Fix the IANA string in chat_config |
 
 ## Related
 
-- Service: `src/services/report_service.rs` + `src/services/summary_service.rs`
-- Job: `src/jobs/{daily_report,summary_generation}.rs`
-- Routes: `src/api/routes_reports.rs` (auth) + `src/api/routes_public.rs` (public)
-- Dashboard: `website/src/features/reports/`
-- Public page: `website/src/pages/public-report.tsx`
+- Service: [`src/services/report_service.rs`](../src/services/report_service.rs)
+- Renderer: [`src/services/report_render.rs`](../src/services/report_render.rs)
+- Chart: [`src/services/chart_service.rs`](../src/services/chart_service.rs)
+- Summary: [`src/services/summary_service.rs`](../src/services/summary_service.rs) + [`src/services/openai_client.rs`](../src/services/openai_client.rs)
+- Job: [`src/jobs/daily_report.rs`](../src/jobs/daily_report.rs) — see also [`docs/rules/background-jobs.md`](rules/background-jobs.md)
+- Models: [`src/models/daily_stats.rs`](../src/models/daily_stats.rs), [`src/models/report_message.rs`](../src/models/report_message.rs), [`src/models/report.rs`](../src/models/report.rs)
+- Sample output: [`reports/sample.md`](reports/sample.md)

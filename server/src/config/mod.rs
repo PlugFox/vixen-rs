@@ -137,6 +137,25 @@ pub struct Config {
     /// long-tail recurrences, short enough to bound table growth.
     #[arg(long, env = "CONFIG_SPAM_RETENTION_DAYS", default_value_t = 14)]
     pub spam_retention_days: u32,
+
+    // ── Reports (M3) ──
+    /// Public dashboard / WebApp base URL used by `/report` to build the
+    /// deep-link the bot replies with. No trailing slash.
+    #[arg(
+        long,
+        env = "CONFIG_WEBAPP_BASE_URL",
+        default_value = "http://localhost:3000"
+    )]
+    pub webapp_base_url: String,
+
+    /// OpenAI Chat Completions base URL. Override in tests to point at a
+    /// wiremock server; production uses the public OpenAI endpoint.
+    #[arg(
+        long,
+        env = "CONFIG_OPENAI_BASE_URL",
+        default_value = "https://api.openai.com"
+    )]
+    pub openai_base_url: String,
 }
 
 impl Config {

@@ -1,17 +1,29 @@
 //! Slash-command handlers. `/verify`, `/ban`, `/unban` go through
 //! `ModerationService` for ledger + idempotent bot side-effect; `/help` and
-//! `/status` are stub replies.
+//! `/status` are stub replies. `/stats`, `/report`, `/summary` are
+//! moderator-only and built on the M3 report + summary services.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use chrono::Utc;
+use redis::AsyncCommands;
 use teloxide::prelude::*;
-use teloxide::types::{ChatId, ChatMemberKind};
+use teloxide::types::{ChatId, ChatMemberKind, ParseMode};
 use tracing::{info, instrument, warn};
 
 use crate::api::AppState;
+use crate::jobs::daily_report;
 use crate::models::moderation_action::ActorKind;
 use crate::services::captcha::Outcome;
 use crate::services::moderation_service::{Action, ApplyContext, Outcome as ModOutcome};
+use crate::services::report_render::{HeaderKind, Lang};
+use crate::services::report_service::last_24h_window;
+use crate::services::summary_service::{SkipReason, SummaryOutcome};
+use crate::services::{report_render, report_service};
 use crate::telegram::commands::Command;
+
+/// Per-chat cooldown for `/stats` and `/summary`. Prevents rapid-fire
+/// invocations from burning OpenAI tokens or producing noise.
+const COMMAND_COOLDOWN_SECS: u64 = 60;
 
 #[instrument(skip(bot, msg, state, cmd), fields(chat_id = msg.chat.id.0))]
 pub async fn dispatch(bot: Bot, msg: Message, state: AppState, cmd: Command) -> Result<()> {
@@ -39,6 +51,9 @@ pub async fn dispatch(bot: Bot, msg: Message, state: AppState, cmd: Command) -> 
         Command::Verify(arg) => verify(bot, msg, state, arg.trim()).await,
         Command::Ban(arg) => ban(bot, msg, state, arg.trim()).await,
         Command::Unban(arg) => unban(bot, msg, state, arg.trim()).await,
+        Command::Stats => stats(bot, msg, state).await,
+        Command::Report => report(bot, msg, state).await,
+        Command::Summary => summary(bot, msg, state).await,
     }
 }
 
@@ -286,6 +301,226 @@ async fn unban(bot: Bot, msg: Message, state: AppState, arg: &str) -> Result<()>
         }
     }
     Ok(())
+}
+
+// ── M3: /stats /report /summary ─────────────────────────────────────────
+
+#[instrument(skip(bot, msg, state), fields(chat_id = msg.chat.id.0))]
+async fn stats(bot: Bot, msg: Message, state: AppState) -> Result<()> {
+    let Some(actor) = msg.from.as_ref() else {
+        return Ok(());
+    };
+    if !is_moderator_or_admin(&bot, &state, msg.chat.id, actor).await {
+        let _ = bot
+            .send_message(
+                msg.chat.id,
+                "Only chat moderators or admins can run /stats.",
+            )
+            .await;
+        return Ok(());
+    }
+    if let Some(remaining) = check_cooldown(&state, msg.chat.id.0, "stats").await? {
+        let _ = bot
+            .send_message(
+                msg.chat.id,
+                format!("/stats: подождите ещё {remaining} секунд."),
+            )
+            .await;
+        return Ok(());
+    }
+
+    let now = Utc::now();
+    let (from, to) = last_24h_window(now);
+    let report = state.reports.aggregate(msg.chat.id.0, from, to).await?;
+    let lang = chat_language(&state, msg.chat.id.0).await;
+    let body = report_render::render(&report, lang, HeaderKind::Last24h);
+
+    let _ = bot
+        .send_message(msg.chat.id, body)
+        .parse_mode(ParseMode::MarkdownV2)
+        .await;
+    info!("/stats delivered");
+    Ok(())
+}
+
+#[instrument(skip(bot, msg, state), fields(chat_id = msg.chat.id.0))]
+async fn report(bot: Bot, msg: Message, state: AppState) -> Result<()> {
+    let Some(actor) = msg.from.as_ref() else {
+        return Ok(());
+    };
+    if !is_moderator_or_admin(&bot, &state, msg.chat.id, actor).await {
+        let _ = bot
+            .send_message(
+                msg.chat.id,
+                "Only chat moderators or admins can run /report.",
+            )
+            .await;
+        return Ok(());
+    }
+
+    let chat_id = msg.chat.id.0;
+    let report_date = daily_report::current_report_date(state.db.pool(), chat_id).await?;
+    let (from, to) = report_service::day_window_utc(report_date);
+    let aggregated = state.reports.aggregate(chat_id, from, to).await?;
+
+    let (lang_str, summary_enabled) = match fetch_lang_and_summary(&state, chat_id).await? {
+        Some(p) => p,
+        None => ("ru".to_string(), false),
+    };
+
+    if let Err(e) = daily_report::deliver(
+        &bot,
+        &state,
+        chat_id,
+        report_date,
+        &lang_str,
+        summary_enabled,
+        &aggregated,
+        HeaderKind::OnDemand,
+    )
+    .await
+    {
+        warn!(error = ?e, "/report deliver failed");
+        let _ = bot
+            .send_message(
+                msg.chat.id,
+                "Не удалось сгенерировать отчёт. Подробности в логе.",
+            )
+            .await;
+    } else {
+        info!("/report delivered");
+        // Best-effort: drop the moderator's command message to keep the chat clean.
+        if let Err(e) = bot.delete_message(msg.chat.id, msg.id).await {
+            warn!(error = %e, "delete /report command message failed");
+        }
+    }
+    Ok(())
+}
+
+#[instrument(skip(bot, msg, state), fields(chat_id = msg.chat.id.0))]
+async fn summary(bot: Bot, msg: Message, state: AppState) -> Result<()> {
+    let Some(actor) = msg.from.as_ref() else {
+        return Ok(());
+    };
+    if !is_moderator_or_admin(&bot, &state, msg.chat.id, actor).await {
+        let _ = bot
+            .send_message(
+                msg.chat.id,
+                "Only chat moderators or admins can run /summary.",
+            )
+            .await;
+        return Ok(());
+    }
+    if let Some(remaining) = check_cooldown(&state, msg.chat.id.0, "summary").await? {
+        let _ = bot
+            .send_message(
+                msg.chat.id,
+                format!("/summary: подождите ещё {remaining} секунд."),
+            )
+            .await;
+        return Ok(());
+    }
+
+    let chat_id = msg.chat.id.0;
+    let now = Utc::now();
+    let (from, to) = last_24h_window(now);
+    let lang = chat_language_str(&state, chat_id).await;
+
+    let outcome = match state.summary.summarize(chat_id, from, to, &lang).await {
+        Ok(o) => o,
+        Err(e) => {
+            warn!(error = ?e, "/summary failed");
+            let _ = bot
+                .send_message(msg.chat.id, "Сводка временно недоступна. Попробуйте позже.")
+                .await;
+            return Ok(());
+        }
+    };
+
+    let reply = match outcome {
+        SummaryOutcome::Generated { text, .. } => text,
+        SummaryOutcome::Skipped { reason } => format_skip_reason(reason),
+    };
+    let _ = bot.send_message(msg.chat.id, reply).await;
+    info!("/summary delivered");
+    Ok(())
+}
+
+fn format_skip_reason(reason: SkipReason) -> String {
+    match reason {
+        SkipReason::NoApiKey => "OpenAI ключ не задан для этого чата. \
+             Задайте chat_config.openai_api_key через дашборд."
+            .to_string(),
+        SkipReason::Disabled => {
+            "AI-сводка отключена для этого чата (chat_config.summary_enabled = FALSE).".to_string()
+        }
+        SkipReason::NoMessages => "Нет сообщений для сводки. \
+             Включите chat_config.log_allowed_messages, чтобы бот сохранял сообщения для AI."
+            .to_string(),
+        SkipReason::BudgetExhausted { used, budget } => {
+            format!("Дневной лимит токенов исчерпан ({used} из {budget}).")
+        }
+    }
+}
+
+/// Returns the chat's `language` column ("ru" / "en") as a [`Lang`] enum.
+/// Falls back to RU on any DB error so a transient hiccup doesn't surface
+/// as user-visible noise.
+async fn chat_language(state: &AppState, chat_id: i64) -> Lang {
+    Lang::from_db_str(&chat_language_str(state, chat_id).await)
+}
+
+async fn chat_language_str(state: &AppState, chat_id: i64) -> String {
+    match sqlx::query_scalar!(
+        r#"SELECT language FROM chat_config WHERE chat_id = $1"#,
+        chat_id,
+    )
+    .fetch_optional(state.db.pool())
+    .await
+    {
+        Ok(Some(s)) => s,
+        _ => "ru".to_string(),
+    }
+}
+
+async fn fetch_lang_and_summary(state: &AppState, chat_id: i64) -> Result<Option<(String, bool)>> {
+    let row = sqlx::query!(
+        r#"SELECT language, summary_enabled FROM chat_config WHERE chat_id = $1"#,
+        chat_id,
+    )
+    .fetch_optional(state.db.pool())
+    .await
+    .context("SELECT chat_config (lang+summary)")?;
+    Ok(row.map(|r| (r.language, r.summary_enabled)))
+}
+
+/// Returns `Some(remaining_secs)` if a cooldown is active, `None` if the
+/// caller may proceed. Sets the cooldown key on a clear path. Implemented
+/// via `SET NX EX` so the check + set is one round-trip and stays correct
+/// under concurrency.
+async fn check_cooldown(state: &AppState, chat_id: i64, cmd: &str) -> Result<Option<u64>> {
+    let key = format!("cmd:{cmd}:{chat_id}");
+    let mut conn = state
+        .redis
+        .pool()
+        .get()
+        .await
+        .context("redis pool acquire (cooldown)")?;
+    let acquired: Option<String> = redis::cmd("SET")
+        .arg(&key)
+        .arg("1")
+        .arg("NX")
+        .arg("EX")
+        .arg(COMMAND_COOLDOWN_SECS)
+        .query_async(&mut *conn)
+        .await
+        .context("SET NX EX cooldown")?;
+    if acquired.is_some() {
+        Ok(None)
+    } else {
+        let ttl: i64 = conn.ttl(&key).await.unwrap_or(-1);
+        Ok(Some(ttl.max(1) as u64))
+    }
 }
 
 /// Returns `(target_user_id, message_id_for_ledger, reason)`. Reply-mode

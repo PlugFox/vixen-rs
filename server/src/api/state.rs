@@ -7,7 +7,9 @@ use crate::config::Config;
 use crate::database::{Database, Redis};
 use crate::services::captcha::{CaptchaService, CaptchaState};
 use crate::services::moderation_service::ModerationService;
+use crate::services::report_service::ReportService;
 use crate::services::spam::service::SpamService;
+use crate::services::summary_service::SummaryService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -26,4 +28,10 @@ pub struct AppState {
     /// Centralised moderation: idempotent ledger + bot side-effect for every
     /// ban / unban / delete (auto or manual).
     pub moderation: Arc<ModerationService>,
+    /// M3 report aggregator: pure-DB read of `daily_stats` /
+    /// `moderation_actions` / `spam_messages` into `ReportData`.
+    pub reports: Arc<ReportService>,
+    /// M3 AI summary: per-chat OpenAI key resolved at call time, daily
+    /// token budget enforced via `daily_stats('openai_tokens_used')`.
+    pub summary: Arc<SummaryService>,
 }

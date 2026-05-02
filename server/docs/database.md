@@ -41,8 +41,12 @@ Per-chat tunable settings. One row per chat.
 | `log_allowed_messages` | `BOOLEAN NOT NULL` | `FALSE` | |
 | `report_hour` | `SMALLINT NOT NULL CHECK (BETWEEN 0 AND 23)` | `17` | chat-local |
 | `timezone` | `VARCHAR(64) NOT NULL` | `'UTC'` | IANA tz name |
-| `summary_enabled` | `BOOLEAN NOT NULL` | `FALSE` | requires CONFIG_OPENAI_KEY |
-| `summary_token_budget` | `INTEGER NOT NULL CHECK (>0)` | `50000` | per day |
+| `report_min_activity` | `SMALLINT NOT NULL CHECK (>=0)` | `20` | daily-report scheduler skips when `messages_seen` for the chat-local day is below this |
+| `summary_enabled` | `BOOLEAN NOT NULL` | `FALSE` | gates the AI-summary caption on the daily report and `/summary` |
+| `summary_token_budget` | `INTEGER NOT NULL CHECK (>0)` | `50000` | per chat-day; hard cap on `daily_stats('openai_tokens_used')` |
+| `openai_api_key` | `TEXT` | `NULL` | per-chat OpenAI key; NULL → no AI summary for this chat |
+| `openai_model` | `VARCHAR(64) NOT NULL` | `'gpt-4o-mini'` | OpenAI model name |
+| `language` | `VARCHAR(8) NOT NULL CHECK (IN ('ru','en'))` | `'ru'` | report locale |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | `NOW()` | trigger-managed |
 
 ### `chat_moderators`
@@ -122,26 +126,28 @@ Audit log. Append-only.
 
 ### `report_messages`
 
-Tracks the Telegram `message_id` of the last posted report per chat per kind, so a redo can delete-and-replace.
+Tracks each Telegram `message_id` posted by the daily-report flow so a re-run can delete-and-replace. Two rows per (`chat_id`, `report_date`) — one for the MarkdownV2 text message, one for the WebP chart photo — keyed by `kind`.
 
 | Column | Type | Notes |
 |---|---|---|
 | `chat_id` | `BIGINT REFERENCES chats(chat_id) ON DELETE CASCADE` | |
-| `kind` | `TEXT NOT NULL CHECK (kind IN ('daily'))` | future: `weekly`, `monthly` |
-| `telegram_message_id` | `BIGINT NOT NULL` | |
+| `report_date` | `DATE NOT NULL` | chat-local date the report was generated for |
+| `kind` | `TEXT NOT NULL CHECK (kind IN ('daily_text','daily_photo'))` | future: `weekly_*`, `monthly_*` |
+| `telegram_message_id` | `INTEGER NOT NULL` | matches teloxide `MessageId` |
 | `generated_at` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | |
-| | | `PRIMARY KEY (chat_id, kind)` |
+| | | `PRIMARY KEY (chat_id, report_date, kind)` |
+| | | Index: `(chat_id, report_date DESC)` for "today's report" lookup |
 
 ### `daily_stats`
 
-Pre-aggregated daily counters per chat per metric.
+Pre-aggregated daily counters per chat per metric. Updated via `models::daily_stats::increment` UPSERT (`INSERT ... ON CONFLICT DO UPDATE SET value = value + EXCLUDED.value`).
 
 | Column | Type | Notes |
 |---|---|---|
 | `chat_id` | `BIGINT REFERENCES chats(chat_id) ON DELETE CASCADE` | |
-| `date` | `DATE NOT NULL` | chat-local date |
-| `kind` | `TEXT NOT NULL` | `'message'`, `'message_deleted'`, `'captcha_attempt'`, `'verified'`, `'banned'`, `'openai_tokens'`, ... |
-| `value` | `BIGINT NOT NULL` | |
+| `date` | `DATE NOT NULL` | server-UTC date when the increment landed |
+| `kind` | `TEXT NOT NULL` | see `Metric` enum: `messages_seen`, `messages_deleted`, `users_banned`, `users_verified`, `captcha_issued`, `captcha_solved`, `captcha_expired`, `openai_tokens_used` |
+| `value` | `BIGINT NOT NULL` | accumulator |
 | | | `PRIMARY KEY (chat_id, date, kind)` |
 | | | Index: `(chat_id, date DESC)` |
 

@@ -11,6 +11,40 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Added
+
+- M3 daily reports. Per-chat scheduler fires at the chat-local hour
+  (`chat_config.report_hour` in `chat_config.timezone`), aggregates 24h
+  metrics from `daily_stats` + `moderation_actions` + `spam_messages`,
+  posts a MarkdownV2 message and a 480×270 lossless WebP chart, and
+  records both message ids in `report_messages` for replace-on-redo.
+  Below `chat_config.report_min_activity` the day is silently skipped.
+  (server)
+- `daily_stats` counter pipeline. `models::daily_stats::increment` UPSERT
+  helper is wired into the message gate (`messages_seen` +
+  `allowed_messages` logging when opted-in), `ModerationService` (deleted
+  / banned / verified), `CaptchaService` (issued / solved / expired) and
+  the captcha-expiry job. (server)
+- `/stats` slash command: in-chat last-24h summary (moderator-only,
+  60s Redis cooldown). (server)
+- `/report` slash command: on-demand full daily report, replaces today's
+  prior pair. (server)
+- `/summary` slash command: AI summary of recent chat activity. Per-chat
+  OpenAI key (`chat_config.openai_api_key`); replies with a clear hint
+  when the key, message logging, or daily token budget is missing.
+  (server)
+- `SummaryService` + `OpenAiClient`. Sanitises URLs / phones / emails /
+  @-mentions before sending to OpenAI, retries 429 / 5xx with exponential
+  backoff (Retry-After honoured), accumulates `daily_stats('openai_tokens_used')`
+  and hard-caps at `chat_config.summary_token_budget`. (server)
+- `chat_config` columns `report_min_activity`, `openai_api_key`,
+  `openai_model`, `language` (per-chat report locale, RU / EN). (server)
+- `report_messages` rebuilt around `(chat_id, report_date, kind)` to
+  carry both the report's text and chart messages and support
+  replace-on-redo. (server)
+- `CONFIG_WEBAPP_BASE_URL` and `CONFIG_OPENAI_BASE_URL` env vars.
+  (server)
+
 ### Security
 
 - captcha photo is sent with `protect_content=true`, blocking forwarding,

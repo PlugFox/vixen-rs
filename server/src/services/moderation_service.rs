@@ -21,6 +21,7 @@ use teloxide::types::{ChatId, MessageId, UserId};
 use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
+use crate::models::daily_stats::{self, Metric};
 use crate::models::moderation_action::{ActorKind, ModerationActionKind};
 
 const MODERATOR_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
@@ -198,6 +199,7 @@ impl ModerationService {
             Ok(()) => {
                 tx.commit().await.context("COMMIT apply tx")?;
                 info!(action_id = %id, "moderation applied");
+                self.bump_daily_stats(action.kind(), ctx.chat_id).await;
                 Ok(Outcome::Applied)
             }
             Err(BotCallOutcome::NonFatal(e)) => {
@@ -205,6 +207,7 @@ impl ModerationService {
                     .await
                     .context("COMMIT apply tx (non-fatal bot error)")?;
                 warn!(error = %e, "bot call non-fatal; ledger row kept");
+                self.bump_daily_stats(action.kind(), ctx.chat_id).await;
                 Ok(Outcome::Applied)
             }
             Err(BotCallOutcome::Fatal(e)) => {
@@ -244,6 +247,25 @@ impl ModerationService {
     /// `chat_moderators` from elsewhere so the cache doesn't go stale.
     pub async fn invalidate_moderator(&self, chat_id: i64, user_id: i64) {
         self.moderator_cache.invalidate(&(chat_id, user_id)).await;
+    }
+
+    /// Mirror the moderation action into the M3 daily-stats counters. Best-
+    /// effort: failure here is logged but never bubbled up — the action is
+    /// already committed and we don't want to surface a misleading error
+    /// just because the counters are unreachable.
+    async fn bump_daily_stats(&self, kind: ModerationActionKind, chat_id: i64) {
+        let metric = match kind {
+            ModerationActionKind::Ban => Metric::UsersBanned,
+            ModerationActionKind::Delete => Metric::MessagesDeleted,
+            ModerationActionKind::Verify => Metric::UsersVerified,
+            // Unban / Mute / Unmute / Unverify / Captcha* / Kick are not
+            // surfaced in the daily report; skip the counter rather than
+            // adding a metric the aggregator never reads.
+            _ => return,
+        };
+        if let Err(e) = daily_stats::increment(&self.db, chat_id, metric, 1).await {
+            warn!(error = ?e, "daily_stats bump failed");
+        }
     }
 
     async fn dispatch(

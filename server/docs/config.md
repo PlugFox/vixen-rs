@@ -23,11 +23,8 @@ Required values cause the server to refuse to start with a clear error message. 
 | `CONFIG_CAS` | bool | `true` | no | Whether to call Combot Anti-Spam during the spam pipeline. |
 | `CONFIG_CAS_URL` | URL | `https://api.cas.chat/check` | no | CAS endpoint. |
 | `CONFIG_CAS_TIMEOUT_MS` | int | `3000` | no | Per-request timeout. Failure is fail-open. |
-| `CONFIG_REPORT_HOUR` | int 0-23 | `17` | no | Default daily-report hour (per-chat override in `chat_config.report_hour`). |
-| `CONFIG_OPENAI_KEY` | string | — | no | If set, AI summary is available per-chat. |
-| `CONFIG_OPENAI_MODEL` | string | `gpt-4o-mini` | no | Model name. |
-| `CONFIG_OPENAI_URL` | URL | `https://api.openai.com/v1/chat/completions` | no | Override for self-hosted compatible APIs. |
-| `CONFIG_OPENAI_TIMEOUT_MS` | int | `30000` | no | Per-request timeout. |
+| `CONFIG_WEBAPP_BASE_URL` | URL (no trailing `/`) | `http://localhost:3000` | no | Public dashboard base URL. Used by `/report` deep-links. |
+| `CONFIG_OPENAI_BASE_URL` | URL | `https://api.openai.com` | no | OpenAI Chat Completions base URL. Override for tests / self-hosted compatible APIs. |
 | `CONFIG_ADMIN_SECRET` | string | — | yes (in prod) | Bearer for `/admin/*`. Constant-time compared. |
 | `CONFIG_JWT_SECRET` | string ≥ 32 bytes | — | yes (in prod) | HS256 secret for dashboard JWTs. Rotate to invalidate all sessions. |
 | `CONFIG_JWT_TTL_SECS` | int | `3600` | no | JWT expiry. |
@@ -43,21 +40,27 @@ Required values cause the server to refuse to start with a clear error message. 
 
 ## Per-chat overrides
 
-These tunables also have per-chat versions in `chat_config` (see [database.md](database.md)). When both are set, the per-chat value wins — the global config is the default for newly-added chats.
+OpenAI key, model, and the report locale are per-chat-only by design — there is no global default in env, only per-chat columns:
 
-- `report_hour` → `chat_config.report_hour`
-- `cas` → `chat_config.cas_enabled`
-- `summary_enabled` (no global; opt-in per-chat) → `chat_config.summary_enabled`
-- `summary_token_budget` (no global) → `chat_config.summary_token_budget`
+- `chat_config.openai_api_key` — NULL = no AI summary for this chat (default)
+- `chat_config.openai_model` — defaults to `gpt-4o-mini`
+- `chat_config.language` — `'ru'` / `'en'`, defaults to `'ru'`
+- `chat_config.report_hour` — `0..23` chat-local
+- `chat_config.timezone` — IANA tz name, defaults to `'UTC'`
+- `chat_config.report_min_activity` — daily-report scheduler skips below this messages_seen
+- `chat_config.summary_enabled` — gates AI-summary caption + `/summary`
+- `chat_config.summary_token_budget` — per chat-day token cap
+- `chat_config.cas_enabled` — overrides global CAS toggle
 
 ## Secret handling
 
-Three values are sensitive:
+The env-level secrets are:
 
 - `CONFIG_BOT_TOKEN`
-- `CONFIG_OPENAI_KEY`
 - `CONFIG_ADMIN_SECRET`
 - `CONFIG_JWT_SECRET`
+
+Per-chat OpenAI keys live in `chat_config.openai_api_key` (TEXT, NULL by default) and are managed through the dashboard rather than env. Logs MUST NOT echo the raw value — handlers that touch the column must run it through a redaction newtype before any `tracing::*!`.
 
 Loaded into `Config` once, wrapped in newtypes that `Display`/`Debug` as `***redacted***`. Never log raw, never expose via any endpoint, never write to disk. The `.claude/settings.json` deny-list blocks Bash patterns that could echo / printenv these.
 

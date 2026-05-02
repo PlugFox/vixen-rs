@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                summary_enabled       AS \"summary_enabled!\",\n                summary_token_budget  AS \"summary_token_budget!\",\n                openai_api_key,\n                openai_model          AS \"openai_model!\",\n                log_allowed_messages  AS \"log_allowed_messages!\"\n            FROM chat_config\n            WHERE chat_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "summary_enabled!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "summary_token_budget!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "openai_api_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "openai_model!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "log_allowed_messages!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "757ee49b58efa1a0f9861b80cc297171e22757d15d363e7d823561c0d671a0c1"
+}

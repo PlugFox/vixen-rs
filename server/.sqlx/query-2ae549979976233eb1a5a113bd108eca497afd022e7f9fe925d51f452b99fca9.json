@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT language, summary_enabled FROM chat_config WHERE chat_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "language",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "summary_enabled",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2ae549979976233eb1a5a113bd108eca497afd022e7f9fe925d51f452b99fca9"
+}
