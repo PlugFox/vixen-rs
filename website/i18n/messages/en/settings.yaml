@@ -1,0 +1,92 @@
+section.captcha:
+  en: "Captcha"
+section.spam:
+  en: "Spam pipeline"
+section.report:
+  en: "Daily report"
+section.summary:
+  en: "AI summary"
+section.misc:
+  en: "Other"
+field.captcha_enabled.label:
+  en: "Captcha gate"
+field.captcha_enabled.hint:
+  en: "Require new members to solve a captcha before they can message."
+field.captcha_lifetime_secs.label:
+  en: "Lifetime (seconds)"
+field.captcha_lifetime_secs.hint:
+  en: "How long the user has to solve the captcha before being kicked."
+field.captcha_attempts.label:
+  en: "Attempts"
+field.captcha_attempts.hint:
+  en: "Wrong digits allowed before a regeneration."
+field.spam_enabled.label:
+  en: "Spam detection"
+field.spam_enabled.hint:
+  en: "Run incoming messages through the spam classifier."
+field.spam_threshold.label:
+  en: "Spam threshold"
+field.spam_threshold.hint:
+  en: "Messages above this score are deleted."
+field.spam_weights.label:
+  en: "Spam weights (JSON)"
+field.spam_weights.hint:
+  en: "Per-feature weight overrides. Leave empty for defaults."
+field.cas_enabled.label:
+  en: "CAS check"
+field.cas_enabled.hint:
+  en: "Consult Combot Anti-Spam before letting a new user post."
+field.clown_chance.label:
+  en: "Clown chance (%)"
+field.clown_chance.hint:
+  en: "Probability the bot replies to flagged spam with a clown emoji instead of deleting."
+field.log_allowed_messages.label:
+  en: "Log allowed messages"
+field.log_allowed_messages.hint:
+  en: "Persist non-spam messages for the AI summary feature. Opt-in only."
+field.report_hour.label:
+  en: "Daily report hour (0-23)"
+field.report_hour.hint:
+  en: "Local hour at which the daily report posts."
+field.timezone.label:
+  en: "Timezone (IANA)"
+field.timezone.hint:
+  en: "e.g. Europe/Moscow, America/Los_Angeles."
+field.summary_enabled.label:
+  en: "AI summary"
+field.summary_enabled.hint:
+  en: "Include an OpenAI-generated synopsis in the daily report."
+field.summary_token_budget.label:
+  en: "Daily token budget"
+field.summary_token_budget.hint:
+  en: "Hard cap on tokens consumed by the summary feature per day."
+field.report_min_activity.label:
+  en: "Minimum activity for report"
+field.report_min_activity.hint:
+  en: "Skip the daily report if fewer than this many messages were sent."
+field.openai_api_key.label:
+  en: "OpenAI API key"
+field.openai_api_key.set:
+  en: "Configured (key is hidden)."
+field.openai_api_key.unset:
+  en: "Not configured."
+field.openai_api_key.update:
+  en: "Update"
+field.openai_api_key.clear:
+  en: "Clear"
+field.openai_api_key.clear-confirm:
+  en: "Clear the OpenAI key for this chat?"
+field.openai_model.label:
+  en: "OpenAI model"
+field.openai_model.hint:
+  en: "e.g. gpt-4o-mini, gpt-4o."
+field.language.label:
+  en: "Reply language"
+field.language.hint:
+  en: "Language used for the daily report and AI summary."
+form.savedToast:
+  en: "Settings saved."
+form.errorToast:
+  en: "Failed to save settings."
+form.dirtyNotice:
+  en: "Unsaved changes."

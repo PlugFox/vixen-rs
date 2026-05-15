@@ -1,0 +1,11 @@
+node_modules
+dist
+.vite
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+src/shared/i18n/generated
+public/locales
+coverage

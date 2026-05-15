@@ -1,0 +1,54 @@
+appTitle:
+  en: "Vixen Dashboard"
+save:
+  en: "Save"
+cancel:
+  en: "Cancel"
+delete:
+  en: "Delete"
+confirm:
+  en: "Confirm"
+close:
+  en: "Close"
+retry:
+  en: "Retry"
+loadMore:
+  en: "Load more"
+noResults:
+  en: "No results"
+errorGeneric:
+  en: "Something went wrong. Please try again."
+errorNetwork:
+  en: "Could not reach the server."
+back:
+  en: "Back"
+signOut:
+  en: "Sign out"
+settings:
+  en: "Settings"
+theme.light:
+  en: "Light"
+theme.dark:
+  en: "Dark"
+theme.system:
+  en: "System"
+locale.en:
+  en: "English"
+locale.ru:
+  en: "Русский"
+copy:
+  en: "Copy"
+copied:
+  en: "Copied"
+edit:
+  en: "Edit"
+applied:
+  en: "Applied"
+alreadyApplied:
+  en: "Already applied"
+loading:
+  en: "Loading…"
+yes:
+  en: "Yes"
+no:
+  en: "No"

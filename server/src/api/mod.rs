@@ -8,6 +8,7 @@ pub mod routes_auth;
 pub mod routes_chats;
 pub mod routes_config;
 pub mod routes_health;
+pub mod routes_moderation;
 pub mod server;
 pub mod state;
 pub mod webapp_auth_middleware;

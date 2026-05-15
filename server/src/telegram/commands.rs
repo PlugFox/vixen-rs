@@ -33,4 +33,9 @@ pub enum Command {
     /// Requires `chat_config.openai_api_key` set for this chat.
     #[command(description = "AI summary of recent chat (moderator)")]
     Summary,
+    /// Reply-mode: `/info` (replied to the target user).
+    /// Id-mode: `/info <user_id>`.
+    /// Shows aggregate moderation history for a user in this chat.
+    #[command(description = "show user's moderation history (moderator)")]
+    Info(String),
 }

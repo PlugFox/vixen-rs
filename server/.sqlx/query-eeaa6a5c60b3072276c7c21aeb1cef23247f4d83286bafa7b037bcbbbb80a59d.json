@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            (SELECT verified_at FROM verified_users\n                WHERE chat_id = $1 AND user_id = $2)              AS \"verified_at?\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2\n                  AND action = 'ban')                             AS \"bans!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2\n                  AND action = 'unban')                           AS \"unbans!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2\n                  AND action = 'captcha_failed')                  AS \"captcha_failed!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2\n                  AND action = 'captcha_expired')                 AS \"captcha_expired!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "verified_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "bans!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "unbans!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "captcha_failed!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "captcha_expired!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "eeaa6a5c60b3072276c7c21aeb1cef23247f4d83286bafa7b037bcbbbb80a59d"
+}

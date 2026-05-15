@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            (SELECT ci.members_count FROM chat_info_cache ci WHERE ci.chat_id = $1)\n                                                                            AS \"members_count?\",\n            (SELECT COUNT(*) FROM verified_users WHERE chat_id = $1)\n                                                                            AS \"verified_count!\",\n            (SELECT COUNT(*) FROM (\n                SELECT DISTINCT ON (target_user_id) action\n                FROM moderation_actions\n                WHERE chat_id = $1 AND action IN ('ban', 'unban')\n                ORDER BY target_user_id, created_at DESC\n            ) sub WHERE sub.action = 'ban')                                 AS \"banned_count!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1\n                  AND action = 'verify' AND actor_kind = 'bot'\n                  AND created_at > NOW() - INTERVAL '1 day')                AS \"captcha_solved_24h!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1\n                  AND action = 'captcha_failed'\n                  AND created_at > NOW() - INTERVAL '1 day')                AS \"captcha_failed_24h!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "members_count?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "verified_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "banned_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "captcha_solved_24h!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "captcha_failed_24h!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c2f692ea6c5c1edbfe1f81995ec39dd8e8f73f7719c5f50a2633b657acc2355d"
+}

@@ -1,0 +1,126 @@
+# Website CI — runs on PRs to master and pushes to master that touch website/**.
+#
+# Five jobs run in parallel:
+#   biome        — bun run check                       (lint + format)
+#   typecheck    — bun run i18n:gen && bun run typecheck
+#   build        — bun run i18n:gen && bun run build
+#   i18n-parity  — bun run i18n:check                  (EN ↔ RU key parity)
+#   test         — bun run test                        (vitest)
+#
+# `i18n:gen` runs before typecheck and build because the generated TS files
+# under `src/shared/i18n/generated/` are gitignored — CI must regenerate
+# them from the YAML sources every run.
+
+name: Website CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "website/**"
+      - ".github/workflows/website-ci.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "website/**"
+      - ".github/workflows/website-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: website-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: website
+
+jobs:
+  biome:
+    name: Lint + format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('website/bun.lock', 'website/package.json') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
+  typecheck:
+    name: Type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('website/bun.lock', 'website/package.json') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run i18n:gen
+      - run: bun run typecheck
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VITE_VERSION: ${{ github.sha }}
+      VITE_GIT_COMMIT: ${{ github.sha }}
+      VITE_BUILD_TIME: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('website/bun.lock', 'website/package.json') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run i18n:gen
+      - run: bun run build
+
+  i18n-parity:
+    name: i18n parity (EN ↔ RU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('website/bun.lock', 'website/package.json') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run i18n:check
+
+  test:
+    name: Tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('website/bun.lock', 'website/package.json') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run i18n:gen
+      - run: bun run test

@@ -1,0 +1,90 @@
+actions.title:
+  ru: "Журнал действий"
+actions.empty:
+  ru: "Действий ещё нет."
+table.columns.when:
+  ru: "Когда"
+table.columns.action:
+  ru: "Действие"
+table.columns.actor:
+  ru: "Исполнитель"
+table.columns.target:
+  ru: "Цель"
+table.columns.reason:
+  ru: "Причина"
+filters.action:
+  ru: "Действие"
+filters.actorKind:
+  ru: "Тип исполнителя"
+filters.userId:
+  ru: "ID пользователя"
+filters.apply:
+  ru: "Применить"
+filters.reset:
+  ru: "Сбросить"
+filters.all:
+  ru: "Все"
+action.ban:
+  ru: "Бан"
+action.unban:
+  ru: "Разбан"
+action.verify:
+  ru: "Подтверждение"
+action.unverify:
+  ru: "Снятие подтверждения"
+action.delete:
+  ru: "Удаление"
+action.captcha_expired:
+  ru: "Капча истекла"
+action.captcha_failed:
+  ru: "Капча провалена"
+action.mute:
+  ru: "Мут"
+action.unmute:
+  ru: "Снятие мута"
+action.kick:
+  ru: "Кик"
+actor.bot:
+  ru: "Бот"
+actor.moderator:
+  ru: "Модератор"
+dialogs.ban.title:
+  ru: "Забанить пользователя"
+dialogs.ban.description:
+  ru: "Бан в этом чате. Повторный бан — no-op (идемпотентно)."
+dialogs.ban.user-id:
+  ru: "Telegram ID пользователя"
+dialogs.ban.reason:
+  ru: "Причина (необязательно)"
+dialogs.ban.submit:
+  ru: "Забанить"
+dialogs.unban.title:
+  ru: "Разбанить пользователя"
+dialogs.unban.user-id:
+  ru: "Telegram ID пользователя"
+dialogs.unban.submit:
+  ru: "Разбанить"
+dialogs.verify.title:
+  ru: "Подтвердить пользователя"
+dialogs.verify.description:
+  ru: "Помечает пользователя как подтверждённого — он пропускает капчу при следующих вступлениях."
+dialogs.verify.user-id:
+  ru: "Telegram ID пользователя"
+dialogs.verify.submit:
+  ru: "Подтвердить"
+toast.ban-applied:
+  ru: "Пользователь забанен."
+toast.ban-already:
+  ru: "Пользователь уже был забанен."
+toast.unban-applied:
+  ru: "Пользователь разбанен."
+toast.unban-already:
+  ru: "Пользователь не был забанен."
+toast.verify-applied:
+  ru: "Пользователь подтверждён."
+toast.verify-already:
+  ru: "Пользователь уже был подтверждён."
+verified.empty:
+  ru: "Подтверждённых пользователей ещё нет."
+banned.empty:
+  ru: "Забаненных пользователей нет."

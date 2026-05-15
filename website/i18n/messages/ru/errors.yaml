@@ -1,0 +1,34 @@
+INVALID_INIT_DATA:
+  ru: "Авторизация Telegram не удалась."
+AUTH_DATE_EXPIRED:
+  ru: "Сессия Telegram слишком старая. Войдите снова."
+JWT_NOT_CONFIGURED:
+  ru: "На сервере не настроен JWT-ключ."
+MISSING_AUTHORIZATION:
+  ru: "Требуется авторизация."
+BAD_AUTHORIZATION:
+  ru: "Заголовок авторизации некорректен."
+INVALID_TOKEN:
+  ru: "Сессия истекла. Войдите снова."
+FORBIDDEN:
+  ru: "У вас нет доступа к этому чату."
+CHAT_CONFIG_NOT_FOUND:
+  ru: "Конфигурация чата не найдена."
+DB_ERROR:
+  ru: "Ошибка базы данных."
+PATCH_VALIDATION:
+  ru: "Одно из значений недопустимо."
+EMPTY_PATCH:
+  ru: "Нечего сохранять."
+BAD_USER_ID:
+  ru: "ID пользователя должен быть положительным."
+BAD_CURSOR:
+  ru: "Некорректный курсор пагинации."
+MODERATION_FAILED:
+  ru: "Не удалось выполнить действие модерации."
+REAUTH_FAILED:
+  ru: "Не удалось обновить сессию."
+NETWORK:
+  ru: "Не удалось связаться с сервером."
+UNKNOWN:
+  ru: "Неизвестная ошибка."

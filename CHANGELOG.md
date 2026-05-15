@@ -13,6 +13,56 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Added
 
+- M5 — moderator dashboard. SolidJS + Kobalte + Tailwind v4 + CVA SPA that
+  lets a chat admin log in via Telegram (WebApp inside the bot OR Login
+  Widget in a regular browser), see the watched chats they moderate, drill
+  into per-chat tabs (Settings, Audit, Verified, Banned), edit the per-chat
+  config with optimistic update + window-focus refetch for hot-reload
+  propagation, and run ban / unban / verify directly from the UI. Auth
+  submits the raw signed `initData` to `/api/v1/auth/telegram/login`; the
+  JWT lives in memory only (never `localStorage` — initData re-submission
+  is cheap). Greenfield `website/` directory: `package.json`, `vite.config.ts`,
+  `tsconfig*.json`, `biome.json`, `vitest.config.ts`, `index.html`,
+  `src/index.{tsx,css}`, `src/global.d.ts`, `src/test-setup.ts`. Architecture
+  copied from `foxic/client/`: `src/{app,features,pages,shared}` layout,
+  `cn()` + Kobalte UI kit, YAML→TS i18n codegen, manual `types.ts` per
+  feature for API types. (website)
+- Server moderation HTTP surface for the dashboard. `GET
+  /api/v1/chats/{chat_id}/moderation/actions` (cursor-paginated audit log
+  with `action` / `actor_kind` / `target_user_id` filters), `POST
+  /api/v1/chats/{chat_id}/moderation/{ban,unban,verify}` (idempotent
+  wrappers over `ModerationService::apply` and
+  `CaptchaService::verify_manual`), `GET
+  /api/v1/chats/{chat_id}/moderation/{verified,banned}` (keyset listings;
+  banned-list derives from the latest terminal action per user). `GET
+  /api/v1/chats/{chat_id}/stats` exposes the chat-detail header counters
+  (members, verified, banned, last-24h captcha solved/failed). All
+  endpoints reuse the `webapp_auth_middleware` JWT + `AuthContext::can_access`
+  IDOR guard. (server)
+- `utils::cursor` — opaque base64-JSON keyset cursor for `(timestamp, id)`
+  pagination shapes. Generic `encode<T>` / `decode<T>` with 4 unit tests
+  covering roundtrip on `(DateTime, Uuid)` and `(DateTime, i64)`, plus
+  garbage / wrong-shape rejection. (server)
+- `/info <user>` Telegram slash command — quick moderation-history reference
+  for a target user in the current chat (verified state + ban / unban /
+  captcha_failed / captcha_expired counts + last 5 ledger rows). Same
+  moderator-or-admin gate as `/ban` / `/verify`. MarkdownV2-formatted reply
+  via `teloxide::utils::markdown::escape`. (server)
+- M5 database migration `20260515000000_m5_indexes` — adds the composite
+  index `idx_verified_users_chat_verified_at (chat_id, verified_at DESC,
+  user_id DESC)` so the keyset pagination on
+  `/api/v1/chats/{id}/moderation/verified` does not full-scan the
+  partition. (server)
+- Website i18n bootstrap — 6 namespaces (`common`, `auth`, `chats`,
+  `moderation`, `settings`, `errors`) shipped in English + Russian.
+  `scripts/i18n-codegen.ts` walks `i18n/messages/{en,ru}/*.yaml`, emits
+  typed `src/shared/i18n/generated/<ns>.ts` constants + runtime-fetched
+  `public/locales/{en,ru}/<ns>.json`. `scripts/i18n-check.ts` is the
+  CI-gated parity check — fails the build if RU drifts from EN. (website)
+- `.github/workflows/website-ci.yml` — 5 parallel jobs (biome / typecheck /
+  build / i18n-parity / vitest) gated on `website/**` paths, with bun
+  install cache keyed on `bun.lock` + `package.json`. (infra)
+
 - M4 web foundation: auth + hot-reload config. Server validates Telegram
   `initData` HMAC (WebApp shape and Login Widget shape), mints a 1h HS256
   JWT, and exposes per-chat config CRUD over `/api/v1/chats/{chat_id}/config`.

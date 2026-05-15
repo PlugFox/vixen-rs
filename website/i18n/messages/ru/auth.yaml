@@ -1,0 +1,18 @@
+title:
+  ru: "Вход"
+prompt:
+  ru: "Войдите через Telegram, чтобы открыть панель модератора."
+openInBot:
+  ru: "Открыть в Telegram"
+notAuthorized:
+  ru: "Вы не являетесь модератором ни одного из отслеживаемых чатов."
+loadingSession:
+  ru: "Восстановление сессии…"
+useTelegramLogin:
+  ru: "Войти через Telegram"
+signOutConfirm:
+  ru: "Выйти из панели?"
+dashboardLabel:
+  ru: "Панель"
+botUsernameMissing:
+  ru: "Имя бота не настроено. Установите VITE_BOT_USERNAME при сборке."

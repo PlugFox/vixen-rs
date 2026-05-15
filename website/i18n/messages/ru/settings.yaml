@@ -1,0 +1,92 @@
+section.captcha:
+  ru: "Капча"
+section.spam:
+  ru: "Антиспам"
+section.report:
+  ru: "Ежедневный отчёт"
+section.summary:
+  ru: "AI-сводка"
+section.misc:
+  ru: "Прочее"
+field.captcha_enabled.label:
+  ru: "Капча на входе"
+field.captcha_enabled.hint:
+  ru: "Требовать решение капчи перед первым сообщением."
+field.captcha_lifetime_secs.label:
+  ru: "Время на решение (сек)"
+field.captcha_lifetime_secs.hint:
+  ru: "Сколько у пользователя секунд на решение капчи."
+field.captcha_attempts.label:
+  ru: "Попыток"
+field.captcha_attempts.hint:
+  ru: "Сколько ошибок разрешено до регенерации."
+field.spam_enabled.label:
+  ru: "Антиспам-конвейер"
+field.spam_enabled.hint:
+  ru: "Прогонять сообщения через классификатор спама."
+field.spam_threshold.label:
+  ru: "Порог спама"
+field.spam_threshold.hint:
+  ru: "Сообщения с оценкой выше — удаляются."
+field.spam_weights.label:
+  ru: "Веса (JSON)"
+field.spam_weights.hint:
+  ru: "Переопределения весов фич. Пусто — значения по умолчанию."
+field.cas_enabled.label:
+  ru: "Проверка CAS"
+field.cas_enabled.hint:
+  ru: "Проверять новых пользователей через Combot Anti-Spam."
+field.clown_chance.label:
+  ru: "Шанс клоуна (%)"
+field.clown_chance.hint:
+  ru: "Вероятность ответа смайлом-клоуном вместо удаления спама."
+field.log_allowed_messages.label:
+  ru: "Логировать разрешённые сообщения"
+field.log_allowed_messages.hint:
+  ru: "Сохранять не-спам сообщения для AI-сводки. Только с согласия."
+field.report_hour.label:
+  ru: "Час публикации отчёта (0-23)"
+field.report_hour.hint:
+  ru: "Локальное время публикации ежедневного отчёта."
+field.timezone.label:
+  ru: "Часовой пояс (IANA)"
+field.timezone.hint:
+  ru: "Например Europe/Moscow или America/Los_Angeles."
+field.summary_enabled.label:
+  ru: "AI-сводка"
+field.summary_enabled.hint:
+  ru: "Включать AI-сводку в ежедневный отчёт."
+field.summary_token_budget.label:
+  ru: "Дневной лимит токенов"
+field.summary_token_budget.hint:
+  ru: "Максимум токенов на сводку в сутки."
+field.report_min_activity.label:
+  ru: "Минимум активности"
+field.report_min_activity.hint:
+  ru: "Пропустить отчёт, если сообщений было меньше."
+field.openai_api_key.label:
+  ru: "OpenAI API ключ"
+field.openai_api_key.set:
+  ru: "Установлен (ключ скрыт)."
+field.openai_api_key.unset:
+  ru: "Не настроен."
+field.openai_api_key.update:
+  ru: "Обновить"
+field.openai_api_key.clear:
+  ru: "Очистить"
+field.openai_api_key.clear-confirm:
+  ru: "Очистить OpenAI ключ для этого чата?"
+field.openai_model.label:
+  ru: "Модель OpenAI"
+field.openai_model.hint:
+  ru: "Например gpt-4o-mini или gpt-4o."
+field.language.label:
+  ru: "Язык ответов"
+field.language.hint:
+  ru: "Язык ежедневного отчёта и AI-сводки."
+form.savedToast:
+  ru: "Настройки сохранены."
+form.errorToast:
+  ru: "Не удалось сохранить настройки."
+form.dirtyNotice:
+  ru: "Есть несохранённые изменения."

@@ -1,0 +1,26 @@
+list.title:
+  en: "Your chats"
+list.empty:
+  en: "No chats yet. Add the bot to a chat and grant it admin rights."
+list.openHint:
+  en: "Click a chat to open settings and the moderation log."
+header.tabs.settings:
+  en: "Settings"
+header.tabs.audit:
+  en: "Audit"
+header.tabs.verified:
+  en: "Verified"
+header.tabs.banned:
+  en: "Banned"
+header.members:
+  en: "Members"
+header.verified:
+  en: "Verified"
+header.banned:
+  en: "Banned"
+header.captchaSolved24h:
+  en: "Captcha solved (24h)"
+header.captchaFailed24h:
+  en: "Captcha failed (24h)"
+header.notSeen:
+  en: "Not seen yet"
