@@ -62,6 +62,18 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 - `.github/workflows/website-ci.yml` — 5 parallel jobs (biome / typecheck /
   build / i18n-parity / vitest) gated on `website/**` paths, with bun
   install cache keyed on `bun.lock` + `package.json`. (infra)
+- Website operator documentation: `website/README.md` quickstart,
+  `website/docs/setup.md` (end-to-end provisioning — BotFather, Login
+  Widget domain registration via `/setdomain`, WebApp menu button via
+  `/setmenubutton`, privacy mode, `chat_moderators` bootstrap, dev HTTPS
+  via ngrok/cloudflared, troubleshooting table), `website/docs/env.md`
+  (full `VITE_*` reference + cross-reference to the server `CONFIG_*` knobs
+  that shape dashboard behaviour). The canonical env template lives at
+  `website/config/template.env` (paralleling `server/config/template.env`).
+  Existing `auth.md` and `api-client.md` brought up to date with the M5
+  implementation (no `/auth/callback` page, runtime `window.__BOT_USERNAME__`
+  override, `VITE_API_URL` rather than the old `VITE_API_BASE_URL`).
+  (website)
 
 - M4 web foundation: auth + hot-reload config. Server validates Telegram
   `initData` HMAC (WebApp shape and Login Widget shape), mints a 1h HS256

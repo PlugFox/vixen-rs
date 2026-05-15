@@ -129,7 +129,11 @@ Render directly via `<img src={chartUrl(chatId)} />`. The `auth` interceptor doe
 
 ## Configuration
 
-`api.baseUrl` defaults to the current origin (`window.location.origin`). For dev with separate ports, set `VITE_API_BASE_URL=http://localhost:8000` in `.env.local`. Vite injects via `import.meta.env`.
+`api.baseUrl` reads from the build-time `__API_URL__` constant defined in
+`vite.config.ts` (`VITE_API_URL`, default `/api/v1`). For dev the default
+plus the `/api → :8000` proxy in `vite.config.ts` is enough; override only
+for split-host deploys. The matching server-side `CONFIG_CORS_ORIGINS` must
+include the dashboard origin. See [`env.md`](./env.md) for the full list.
 
 ## Related
 
