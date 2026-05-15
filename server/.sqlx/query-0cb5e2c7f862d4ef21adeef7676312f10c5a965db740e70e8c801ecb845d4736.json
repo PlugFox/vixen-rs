@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT action, actor_kind, actor_user_id, reason, created_at\n        FROM moderation_actions\n        WHERE chat_id = $1 AND target_user_id = $2\n        ORDER BY created_at DESC, id DESC\n        LIMIT 5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "action",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "actor_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_user_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "0cb5e2c7f862d4ef21adeef7676312f10c5a965db740e70e8c801ecb845d4736"
+}

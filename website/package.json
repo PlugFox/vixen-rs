@@ -1,0 +1,48 @@
+{
+  "name": "vixen-website",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Moderator dashboard for the vixen-rs Telegram anti-spam bot.",
+  "scripts": {
+    "dev": "bun run i18n:gen && vite",
+    "build": "bun run i18n:gen && tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "bun run i18n:gen && tsc -b --noEmit",
+    "lint": "biome lint src/",
+    "format": "biome format src/",
+    "format:check": "biome check --formatter-enabled=true --linter-enabled=false src/",
+    "format:fix": "biome format --write src/",
+    "check": "biome check src/",
+    "check:fix": "biome check --write src/",
+    "i18n:gen": "bun run scripts/i18n-codegen.ts",
+    "i18n:check": "bun run scripts/i18n-check.ts",
+    "test": "bun run i18n:gen && vitest run",
+    "test:watch": "bun run i18n:gen && vitest",
+    "test:coverage": "bun run i18n:gen && vitest run --coverage"
+  },
+  "dependencies": {
+    "@kobalte/core": "^0.13.11",
+    "@solidjs/router": "^0.16.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "solid-js": "^1.9.12",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
+    "@solidjs/testing-library": "^0.8.10",
+    "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.4",
+    "jsdom": "^29.0.2",
+    "tailwindcss": "^4.2.2",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.8",
+    "vite-plugin-solid": "^2.11.12",
+    "vitest": "^4.1.4",
+    "yaml": "^2.8.3"
+  }
+}

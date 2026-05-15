@@ -3,5 +3,6 @@
 
 pub mod captcha;
 pub mod commands;
+pub mod commands_info;
 pub mod member_update;
 pub mod message_gate;

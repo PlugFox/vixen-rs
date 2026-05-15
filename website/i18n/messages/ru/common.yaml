@@ -1,0 +1,54 @@
+appTitle:
+  ru: "Vixen Панель"
+save:
+  ru: "Сохранить"
+cancel:
+  ru: "Отмена"
+delete:
+  ru: "Удалить"
+confirm:
+  ru: "Подтвердить"
+close:
+  ru: "Закрыть"
+retry:
+  ru: "Повторить"
+loadMore:
+  ru: "Загрузить ещё"
+noResults:
+  ru: "Ничего не найдено"
+errorGeneric:
+  ru: "Что-то пошло не так. Попробуйте ещё раз."
+errorNetwork:
+  ru: "Не удалось связаться с сервером."
+back:
+  ru: "Назад"
+signOut:
+  ru: "Выйти"
+settings:
+  ru: "Настройки"
+theme.light:
+  ru: "Светлая"
+theme.dark:
+  ru: "Тёмная"
+theme.system:
+  ru: "Системная"
+locale.en:
+  ru: "English"
+locale.ru:
+  ru: "Русский"
+copy:
+  ru: "Копировать"
+copied:
+  ru: "Скопировано"
+edit:
+  ru: "Изменить"
+applied:
+  ru: "Применено"
+alreadyApplied:
+  ru: "Уже применено"
+loading:
+  ru: "Загрузка…"
+yes:
+  ru: "Да"
+no:
+  ru: "Нет"

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            (SELECT verified_at FROM verified_users WHERE chat_id = $1 AND user_id = $2)\n                                                                            AS \"verified_at?\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2 AND action = 'ban')\n                                                                            AS \"bans!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2 AND action = 'unban')\n                                                                            AS \"unbans!\",\n            (SELECT COUNT(*) FROM moderation_actions\n                WHERE chat_id = $1 AND target_user_id = $2 AND action = 'captcha_failed')\n                                                                            AS \"captcha_failed!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "verified_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "bans!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "unbans!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "captcha_failed!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d647c40ebcc3c7b104ffda6aa28f26ea688da771bcff1f3cd28ba9e100e7ab5f"
+}

@@ -37,7 +37,8 @@ pub async fn dispatch(bot: Bot, msg: Message, state: AppState, cmd: Command) -> 
                      /status — bot status in this chat\n\
                      /verify (reply or <user_id>) — moderator: manually verify a user\n\
                      /ban (reply or <user_id> [reason]) — moderator: ban a user\n\
-                     /unban <user_id> — moderator: lift a ban",
+                     /unban <user_id> — moderator: lift a ban\n\
+                     /info (reply or <user_id>) — moderator: show user's moderation history",
                 )
                 .await;
             Ok(())
@@ -54,6 +55,15 @@ pub async fn dispatch(bot: Bot, msg: Message, state: AppState, cmd: Command) -> 
         Command::Stats => stats(bot, msg, state).await,
         Command::Report => report(bot, msg, state).await,
         Command::Summary => summary(bot, msg, state).await,
+        Command::Info(arg) => {
+            let arg = arg.trim().to_string();
+            let actor = match msg.from.as_ref() {
+                Some(u) => u.clone(),
+                None => return Ok(()),
+            };
+            let authorized = is_moderator_or_admin(&bot, &state, msg.chat.id, &actor).await;
+            crate::telegram::handlers::commands_info::info(bot, msg, state, &arg, authorized).await
+        }
     }
 }
 

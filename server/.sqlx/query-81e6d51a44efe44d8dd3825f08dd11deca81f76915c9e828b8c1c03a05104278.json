@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT user_id, verified_at\n        FROM verified_users\n        WHERE chat_id = $1\n          AND (\n              $2::timestamptz IS NULL\n              OR (verified_at, user_id) < ($2, $3)\n          )\n        ORDER BY verified_at DESC, user_id DESC\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "verified_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "81e6d51a44efe44d8dd3825f08dd11deca81f76915c9e828b8c1c03a05104278"
+}

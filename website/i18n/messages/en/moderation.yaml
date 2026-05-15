@@ -1,0 +1,90 @@
+actions.title:
+  en: "Audit log"
+actions.empty:
+  en: "No actions yet."
+table.columns.when:
+  en: "When"
+table.columns.action:
+  en: "Action"
+table.columns.actor:
+  en: "Actor"
+table.columns.target:
+  en: "Target"
+table.columns.reason:
+  en: "Reason"
+filters.action:
+  en: "Action"
+filters.actorKind:
+  en: "Actor kind"
+filters.userId:
+  en: "User ID"
+filters.apply:
+  en: "Apply"
+filters.reset:
+  en: "Reset"
+filters.all:
+  en: "All"
+action.ban:
+  en: "Ban"
+action.unban:
+  en: "Unban"
+action.verify:
+  en: "Verify"
+action.unverify:
+  en: "Unverify"
+action.delete:
+  en: "Delete"
+action.captcha_expired:
+  en: "Captcha expired"
+action.captcha_failed:
+  en: "Captcha failed"
+action.mute:
+  en: "Mute"
+action.unmute:
+  en: "Unmute"
+action.kick:
+  en: "Kick"
+actor.bot:
+  en: "Bot"
+actor.moderator:
+  en: "Moderator"
+dialogs.ban.title:
+  en: "Ban user"
+dialogs.ban.description:
+  en: "Bans the user across this chat. The ledger row is idempotent — banning twice is a no-op."
+dialogs.ban.user-id:
+  en: "Telegram user ID"
+dialogs.ban.reason:
+  en: "Reason (optional)"
+dialogs.ban.submit:
+  en: "Ban user"
+dialogs.unban.title:
+  en: "Unban user"
+dialogs.unban.user-id:
+  en: "Telegram user ID"
+dialogs.unban.submit:
+  en: "Unban user"
+dialogs.verify.title:
+  en: "Verify user"
+dialogs.verify.description:
+  en: "Marks the user as verified — they skip the captcha gate on future joins."
+dialogs.verify.user-id:
+  en: "Telegram user ID"
+dialogs.verify.submit:
+  en: "Verify user"
+toast.ban-applied:
+  en: "User banned."
+toast.ban-already:
+  en: "User was already banned."
+toast.unban-applied:
+  en: "User unbanned."
+toast.unban-already:
+  en: "User was not banned."
+toast.verify-applied:
+  en: "User verified."
+toast.verify-already:
+  en: "User was already verified."
+verified.empty:
+  en: "No verified users yet."
+banned.empty:
+  en: "No banned users."

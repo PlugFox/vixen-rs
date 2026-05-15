@@ -20,12 +20,18 @@ use crate::api::admin_secret_middleware::{ADMIN_SECRET_HEADER, admin_secret_midd
 use crate::api::routes_about::AboutResponse;
 use crate::api::routes_admin::AdminPingResponse;
 use crate::api::routes_auth::{LoginRequest, LoginResponse, LoginUser, MeResponse};
-use crate::api::routes_chats::{ChatSummary, ChatsListResponse};
+use crate::api::routes_chats::{ChatStatsResponse, ChatSummary, ChatsListResponse};
 use crate::api::routes_health::{HealthChecks, HealthResponse};
+use crate::api::routes_moderation::{
+    BanRequest, BannedUserItem, BannedUsersListResponse, ModerationActionItem,
+    ModerationActionResponse, ModerationActionsListResponse, UnbanRequest, VerifiedUserItem,
+    VerifiedUsersListResponse, VerifyRequest,
+};
 use crate::api::state::AppState;
 use crate::api::webapp_auth_middleware::webapp_auth_middleware;
 use crate::api::{
     routes_about, routes_admin, routes_auth, routes_chats, routes_config, routes_health,
+    routes_moderation,
 };
 use crate::models::{ChatConfigDto, ChatConfigPatch};
 
@@ -50,9 +56,20 @@ use crate::models::{ChatConfigDto, ChatConfigPatch};
         MeResponse,
         ChatSummary,
         ChatsListResponse,
+        ChatStatsResponse,
         ChatConfigDto,
         ChatConfigPatch,
         AdminPingResponse,
+        ModerationActionItem,
+        ModerationActionsListResponse,
+        ModerationActionResponse,
+        BanRequest,
+        UnbanRequest,
+        VerifyRequest,
+        VerifiedUserItem,
+        VerifiedUsersListResponse,
+        BannedUserItem,
+        BannedUsersListResponse,
     )),
     modifiers(&SecurityAddon),
     tags(
@@ -60,6 +77,7 @@ use crate::models::{ChatConfigDto, ChatConfigPatch};
         (name = "auth", description = "Telegram WebApp / Login Widget authentication"),
         (name = "chats", description = "Watched chats the moderator can manage"),
         (name = "config", description = "Per-chat configuration CRUD"),
+        (name = "moderation", description = "Audit log + ban/unban/verify from the dashboard"),
         (name = "admin", description = "Operational endpoints behind a shared secret"),
     )
 )]
@@ -103,14 +121,21 @@ pub fn build_router(state: AppState) -> Router {
         .routes(routes!(routes_about::about))
         .routes(routes!(routes_auth::telegram_login));
 
-    // JWT-protected: /api/v1/auth/me, /api/v1/chats, /api/v1/chats/{id}/config.
+    // JWT-protected: /api/v1/auth/me, /api/v1/chats, /api/v1/chats/{id}/{config, stats, moderation/*}.
     let protected = OpenApiRouter::new()
         .routes(routes!(routes_auth::me))
         .routes(routes!(routes_chats::list_chats))
+        .routes(routes!(routes_chats::get_stats))
         .routes(routes!(
             routes_config::get_config,
             routes_config::patch_config
         ))
+        .routes(routes!(routes_moderation::list_actions))
+        .routes(routes!(routes_moderation::ban_user))
+        .routes(routes!(routes_moderation::unban_user))
+        .routes(routes!(routes_moderation::verify_user))
+        .routes(routes!(routes_moderation::list_verified))
+        .routes(routes!(routes_moderation::list_banned))
         .layer(from_fn_with_state(state.clone(), webapp_auth_middleware));
 
     // Admin-secret: /admin/ping.

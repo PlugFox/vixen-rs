@@ -11,7 +11,125 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Fixed
+
+- **PR #99 Copilot review — 12 bug fixes across server + website.**
+  - `routes_moderation::list_banned` CTE and `routes_chats::get_stats`
+    banned_count subquery now include an `id DESC` tie-breaker in
+    `DISTINCT ON`. Without it, a tied `(created_at, action)` pair from one
+    transaction was resolved non-deterministically, so the same dataset
+    could flip a user in/out of "banned" between query runs. Regression
+    test `banned_list_id_tie_breaker_when_created_at_ties` seeds two
+    actions with identical `created_at` and explicit UUIDs to force the
+    tie path. (server)
+  - `tests/routes_moderation.rs::ban_then_double_ban_returns_already_applied`
+    rewritten — the old version skipped its assertion when the dummy bot
+    endpoint surfaced an error envelope, letting the idempotency contract
+    regress silently. The replacement pre-seeds the ledger row directly
+    and asserts `outcome: "already_applied"` plus a row-count check —
+    no dependency on the bot endpoint. (server)
+  - `commands_info` now explicitly documents and tells the user that
+    `@username` is NOT supported (Telegram doesn't expose a reliable
+    username→id resolver to bots). PR description / CHANGELOG / test plan
+    realigned with the actual `<user_id>` / reply target resolution.
+    (server)
+  - `shared/api/interceptors.ts::createAuthInterceptor` —
+    1) skip reauth for `/auth/telegram/login` and `/auth/me` to break the
+       recursive loop a failing initData submission used to trigger
+       (`reauth()` → `signInWithInitData()` → same endpoint → another
+       401 → ...);
+    2) snapshot the request body to an `ArrayBuffer` BEFORE the first
+       fetch — `req.body` is a one-shot stream and the retried mutation
+       used to be sent without its payload.
+    6 new vitest cases cover the no-loop, body-replay, mutex dedup, and
+    header-injection paths. (website)
+  - `features/settings/components/settings-form.tsx` —
+    1) `onMount` returning a cleanup function does not register disposal
+       in Solid; the `window.focus` listener now uses `onCleanup` and no
+       longer leaks every time the user navigates between chats;
+    2) numeric `set()` rejects non-finite values — clearing a number
+       input previously stored `NaN`, which `JSON.stringify` serialises
+       to `null`, and the server rejected the PATCH with 400;
+    3) drop the `auto` language option — the server's chat_config check
+       constraint accepts only `en` / `ru`, so the choice would always
+       400. (website)
+  - `package.json` scripts now run `bun run i18n:gen` before `dev`,
+    `build`, `typecheck`, `test`, `test:watch`, `test:coverage` — the
+    generated `src/shared/i18n/generated/` directory is gitignored, so a
+    fresh checkout used to fail until the developer manually ran the
+    codegen. (website)
+  - `shared/ui/dialog.tsx` — moved the close-button `aria-label` from
+    the inner SVG to the `KDialog.CloseButton` itself; the SVG carries
+    `aria-hidden="true"`. Screen-reader announce-as-unlabeled regression
+    closed. (website)
+  - `features/moderation/components/audit-filters.tsx` reset button is
+    now labeled with `moderation.filters.reset` rather than the generic
+    `common.cancel` — the button resets filters, it doesn't cancel a
+    pending edit. (website)
+
 ### Added
+
+- M5 — moderator dashboard. SolidJS + Kobalte + Tailwind v4 + CVA SPA that
+  lets a chat admin log in via Telegram (WebApp inside the bot OR Login
+  Widget in a regular browser), see the watched chats they moderate, drill
+  into per-chat tabs (Settings, Audit, Verified, Banned), edit the per-chat
+  config with optimistic update + window-focus refetch for hot-reload
+  propagation, and run ban / unban / verify directly from the UI. Auth
+  submits the raw signed `initData` to `/api/v1/auth/telegram/login`; the
+  JWT lives in memory only (never `localStorage` — initData re-submission
+  is cheap). Greenfield `website/` directory: `package.json`, `vite.config.ts`,
+  `tsconfig*.json`, `biome.json`, `vitest.config.ts`, `index.html`,
+  `src/index.{tsx,css}`, `src/global.d.ts`, `src/test-setup.ts`. Architecture
+  copied from `foxic/client/`: `src/{app,features,pages,shared}` layout,
+  `cn()` + Kobalte UI kit, YAML→TS i18n codegen, manual `types.ts` per
+  feature for API types. (website)
+- Server moderation HTTP surface for the dashboard. `GET
+  /api/v1/chats/{chat_id}/moderation/actions` (cursor-paginated audit log
+  with `action` / `actor_kind` / `target_user_id` filters), `POST
+  /api/v1/chats/{chat_id}/moderation/{ban,unban,verify}` (idempotent
+  wrappers over `ModerationService::apply` and
+  `CaptchaService::verify_manual`), `GET
+  /api/v1/chats/{chat_id}/moderation/{verified,banned}` (keyset listings;
+  banned-list derives from the latest terminal action per user). `GET
+  /api/v1/chats/{chat_id}/stats` exposes the chat-detail header counters
+  (members, verified, banned, last-24h captcha solved/failed). All
+  endpoints reuse the `webapp_auth_middleware` JWT + `AuthContext::can_access`
+  IDOR guard. (server)
+- `utils::cursor` — opaque base64-JSON keyset cursor for `(timestamp, id)`
+  pagination shapes. Generic `encode<T>` / `decode<T>` with 4 unit tests
+  covering roundtrip on `(DateTime, Uuid)` and `(DateTime, i64)`, plus
+  garbage / wrong-shape rejection. (server)
+- `/info <user>` Telegram slash command — quick moderation-history reference
+  for a target user in the current chat (verified state + ban / unban /
+  captcha_failed / captcha_expired counts + last 5 ledger rows). Same
+  moderator-or-admin gate as `/ban` / `/verify`. MarkdownV2-formatted reply
+  via `teloxide::utils::markdown::escape`. (server)
+- M5 database migration `20260515000000_m5_indexes` — adds the composite
+  index `idx_verified_users_chat_verified_at (chat_id, verified_at DESC,
+  user_id DESC)` so the keyset pagination on
+  `/api/v1/chats/{id}/moderation/verified` does not full-scan the
+  partition. (server)
+- Website i18n bootstrap — 6 namespaces (`common`, `auth`, `chats`,
+  `moderation`, `settings`, `errors`) shipped in English + Russian.
+  `scripts/i18n-codegen.ts` walks `i18n/messages/{en,ru}/*.yaml`, emits
+  typed `src/shared/i18n/generated/<ns>.ts` constants + runtime-fetched
+  `public/locales/{en,ru}/<ns>.json`. `scripts/i18n-check.ts` is the
+  CI-gated parity check — fails the build if RU drifts from EN. (website)
+- `.github/workflows/website-ci.yml` — 5 parallel jobs (biome / typecheck /
+  build / i18n-parity / vitest) gated on `website/**` paths, with bun
+  install cache keyed on `bun.lock` + `package.json`. (infra)
+- Website operator documentation: `website/README.md` quickstart,
+  `website/docs/setup.md` (end-to-end provisioning — BotFather, Login
+  Widget domain registration via `/setdomain`, WebApp menu button via
+  `/setmenubutton`, privacy mode, `chat_moderators` bootstrap, dev HTTPS
+  via ngrok/cloudflared, troubleshooting table), `website/docs/env.md`
+  (full `VITE_*` reference + cross-reference to the server `CONFIG_*` knobs
+  that shape dashboard behaviour). The canonical env template lives at
+  `website/config/template.env` (paralleling `server/config/template.env`).
+  Existing `auth.md` and `api-client.md` brought up to date with the M5
+  implementation (no `/auth/callback` page, runtime `window.__BOT_USERNAME__`
+  override, `VITE_API_URL` rather than the old `VITE_API_BASE_URL`).
+  (website)
 
 - M4 web foundation: auth + hot-reload config. Server validates Telegram
   `initData` HMAC (WebApp shape and Login Widget shape), mints a 1h HS256

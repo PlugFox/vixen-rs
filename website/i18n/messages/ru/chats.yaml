@@ -1,0 +1,26 @@
+list.title:
+  ru: "Ваши чаты"
+list.empty:
+  ru: "Чатов пока нет. Добавьте бота в чат и дайте ему права администратора."
+list.openHint:
+  ru: "Откройте чат, чтобы перейти к настройкам и журналу модерации."
+header.tabs.settings:
+  ru: "Настройки"
+header.tabs.audit:
+  ru: "Журнал"
+header.tabs.verified:
+  ru: "Подтверждённые"
+header.tabs.banned:
+  ru: "Забанены"
+header.members:
+  ru: "Участников"
+header.verified:
+  ru: "Подтверждённые"
+header.banned:
+  ru: "Забанены"
+header.captchaSolved24h:
+  ru: "Капча пройдена (24ч)"
+header.captchaFailed24h:
+  ru: "Капча провалена (24ч)"
+header.notSeen:
+  ru: "Бот ещё не видел чат"

@@ -3,7 +3,7 @@
 The dashboard authenticates via Telegram. Two entry modes:
 
 1. **Inside Telegram WebApp** — the bot exposes an "Open dashboard" inline button with a `web_app` field. Telegram opens the dashboard in a WebView, exposing `Telegram.WebApp.initData` immediately.
-2. **Browser** — user navigates to the dashboard URL directly. The Telegram Login Widget renders; user signs in via Telegram, the widget posts a callback to `/auth/callback`. The website composes an `initData`-shaped string from the callback fields.
+2. **Browser** — user navigates to the dashboard URL directly. The Telegram Login Widget renders inline (the dashboard does not navigate to a separate callback page); the widget invokes `window.onTelegramAuth(user)` in the same page. The website composes an `initData`-shaped string from the callback fields and submits it.
 
 Both modes converge: POST raw signed `initData` to `POST /api/v1/auth/telegram/login`. Server validates HMAC, mints a JWT (1h TTL), returns `{token, user, chat_ids}`. JWT lives in **memory only**.
 
@@ -61,7 +61,7 @@ onMount(() => {
   const script = document.createElement("script");
   script.async = true;
   script.src = "https://telegram.org/js/telegram-widget.js?22";
-  script.setAttribute("data-telegram-login", import.meta.env.VITE_BOT_USERNAME);
+  script.setAttribute("data-telegram-login", botUsername());  // VITE_BOT_USERNAME → window.__BOT_USERNAME__ override
   script.setAttribute("data-size", "large");
   script.setAttribute("data-onauth", "onTelegramAuth(user)");
   script.setAttribute("data-request-access", "write");
@@ -126,7 +126,7 @@ This is intentional:
 - **Browser mode**: re-prompting the Login Widget is one click; cold start re-prompt is acceptable UX.
 - **Security**: localStorage adds a session-fixation surface (a malicious script in the same origin can read it).
 
-Page reload = re-auth. For the rare case where this is annoying (frequent reload during dev), `VITE_DEV_PERSIST_JWT=1` can persist to sessionStorage — never enabled in prod.
+Page reload = re-auth. WebApp mode handles this silently — `getInitData()` is always one read away, so the page transparently re-issues a fresh JWT on every cold start. Browser mode shows the Login Widget again on reload (one extra click).
 
 ## Permission gating
 

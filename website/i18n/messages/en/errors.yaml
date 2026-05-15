@@ -1,0 +1,34 @@
+INVALID_INIT_DATA:
+  en: "Telegram authentication failed."
+AUTH_DATE_EXPIRED:
+  en: "Telegram session is too old. Please sign in again."
+JWT_NOT_CONFIGURED:
+  en: "Server is missing a JWT secret."
+MISSING_AUTHORIZATION:
+  en: "Authentication required."
+BAD_AUTHORIZATION:
+  en: "Authentication header is malformed."
+INVALID_TOKEN:
+  en: "Session expired. Please sign in again."
+FORBIDDEN:
+  en: "You don't have access to this chat."
+CHAT_CONFIG_NOT_FOUND:
+  en: "Chat configuration was not found."
+DB_ERROR:
+  en: "A database error occurred."
+PATCH_VALIDATION:
+  en: "One of the fields is invalid."
+EMPTY_PATCH:
+  en: "Nothing to save."
+BAD_USER_ID:
+  en: "User ID must be a positive number."
+BAD_CURSOR:
+  en: "Pagination cursor is malformed."
+MODERATION_FAILED:
+  en: "Moderation action failed."
+REAUTH_FAILED:
+  en: "Could not refresh the session."
+NETWORK:
+  en: "Could not reach the server."
+UNKNOWN:
+  en: "Unknown error."
