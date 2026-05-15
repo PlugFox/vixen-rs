@@ -25,7 +25,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, Timelike, Utc};
 use chrono_tz::Tz;
-use sqlx::PgPool;
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, InputFile, MessageId, ParseMode};
 use tokio_util::sync::CancellationToken;
@@ -33,6 +32,7 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::api::AppState;
 use crate::models::report_message::{self, ReportKind};
+use crate::services::chat_config_service::ChatConfigError;
 use crate::services::report_render::{HeaderKind, Lang};
 use crate::services::report_service::{ReportService, day_window_local};
 use crate::services::summary_service::SummaryOutcome;
@@ -82,25 +82,18 @@ struct ScheduleConfig {
     summary_enabled: bool,
 }
 
-async fn fetch_schedule_config(pool: &PgPool, chat_id: i64) -> Result<Option<ScheduleConfig>> {
-    let row = sqlx::query!(
-        r#"
-        SELECT report_hour, timezone, report_min_activity, language, summary_enabled
-        FROM chat_config
-        WHERE chat_id = $1
-        "#,
-        chat_id,
-    )
-    .fetch_optional(pool)
-    .await
-    .context("SELECT chat_config (schedule)")?;
-    Ok(row.map(|r| ScheduleConfig {
-        report_hour: r.report_hour,
-        timezone: r.timezone,
-        min_activity: r.report_min_activity,
-        language: r.language,
-        summary_enabled: r.summary_enabled,
-    }))
+async fn fetch_schedule_config(state: &AppState, chat_id: i64) -> Result<Option<ScheduleConfig>> {
+    match state.chat_config.get(chat_id).await {
+        Ok(c) => Ok(Some(ScheduleConfig {
+            report_hour: c.report_hour,
+            timezone: c.timezone.clone(),
+            min_activity: c.report_min_activity,
+            language: c.language.clone(),
+            summary_enabled: c.summary_enabled,
+        })),
+        Err(ChatConfigError::NotFound(_)) => Ok(None),
+        Err(e) => Err(anyhow::Error::new(e).context("chat_config (schedule)")),
+    }
 }
 
 async fn maybe_fire(
@@ -109,7 +102,7 @@ async fn maybe_fire(
     reports: &Arc<ReportService>,
     chat_id: i64,
 ) -> Result<()> {
-    let cfg = match fetch_schedule_config(state.db.pool(), chat_id).await? {
+    let cfg = match fetch_schedule_config(state, chat_id).await? {
         Some(c) => c,
         None => return Ok(()),
     };
@@ -255,16 +248,19 @@ pub async fn deliver(
 /// Helper for `/report` handlers: convert the bot's UTC `now` into the
 /// chat-local date used as the report key, falling back to UTC if the
 /// chat's `timezone` is malformed.
-pub async fn current_report_date(pool: &PgPool, chat_id: i64) -> Result<NaiveDate> {
-    Ok(current_report_date_with_tz(pool, chat_id).await?.0)
+pub async fn current_report_date(state: &AppState, chat_id: i64) -> Result<NaiveDate> {
+    Ok(current_report_date_with_tz(state, chat_id).await?.0)
 }
 
 /// Same as [`current_report_date`] but also returns the resolved IANA `Tz`.
 /// `/report` needs both — the date keys the report row, the timezone gives
 /// `day_window_local` precise UTC bounds for the `daily_stats` /
 /// `moderation_actions` window.
-pub async fn current_report_date_with_tz(pool: &PgPool, chat_id: i64) -> Result<(NaiveDate, Tz)> {
-    let cfg = fetch_schedule_config(pool, chat_id).await?;
+pub async fn current_report_date_with_tz(
+    state: &AppState,
+    chat_id: i64,
+) -> Result<(NaiveDate, Tz)> {
+    let cfg = fetch_schedule_config(state, chat_id).await?;
     let tz = cfg
         .as_ref()
         .and_then(|c| c.timezone.parse::<Tz>().ok())

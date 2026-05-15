@@ -1,12 +1,12 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT language FROM chat_config WHERE chat_id = $1",
+  "query": "SELECT chat_id FROM chat_config WHERE chat_id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "language",
-        "type_info": "Varchar"
+        "name": "chat_id",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "42926efb47104e749f62a9f79c2d9b8682410d21174379336ff5cb0519fce931"
+  "hash": "afc620510993801e24cae962959e5334f34440f7d63cf0c2243d4e19554a5c47"
 }

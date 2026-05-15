@@ -1,6 +1,6 @@
 [package]
 name = "vixen-server"
-version = "0.4.1"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -143,6 +143,7 @@ unicode-normalization = "0.1"
 sha2 = "0.10"
 hmac = "0.12"
 subtle = "2.6"
+hex = "0.4"
 
 # Auth — JWT for the dashboard. `aws_lc_rs` instead of `rust_crypto` so RSA goes
 # through aws-lc rather than the `rsa` crate (RUSTSEC-2023-0071).

@@ -98,11 +98,16 @@ fn rand_message_id() -> i32 {
 }
 
 async fn make_service(pool: PgPool) -> SpamService {
+    use std::sync::Arc;
+    use vixen_server::database::Database;
+    use vixen_server::services::chat_config_service::ChatConfigService;
     let redis = redis().await;
     // Base URL is unused once cas_enabled is FALSE in chat_config — the
     // CAS branch never runs, so we can pass any string.
-    let cas = CasClient::new(redis, "http://localhost:0".to_string());
-    SpamService::new(pool, cas)
+    let cas = CasClient::new(redis.clone(), "http://localhost:0".to_string());
+    let db = Arc::new(Database::from_pool(pool.clone()));
+    let chat_config = Arc::new(ChatConfigService::new(db, redis));
+    SpamService::new(pool, cas, chat_config)
 }
 
 /// Wipe the global `spam_messages` table between samples. The table has no

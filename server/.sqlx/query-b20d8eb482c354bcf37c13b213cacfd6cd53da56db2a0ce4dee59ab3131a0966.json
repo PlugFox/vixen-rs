@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            c.chat_id,\n            c.slug,\n            ci.title         AS \"title?\",\n            ci.type          AS \"kind?\",\n            ci.members_count AS \"members_count?\"\n        FROM chats c\n        LEFT JOIN chat_info_cache ci ON ci.chat_id = c.chat_id\n        WHERE c.chat_id = ANY($1)\n        ORDER BY c.chat_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "title?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "members_count?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b20d8eb482c354bcf37c13b213cacfd6cd53da56db2a0ce4dee59ab3131a0966"
+}

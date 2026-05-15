@@ -21,6 +21,7 @@ use vixen_server::{
     jobs,
     services::captcha::{CaptchaService, CaptchaState, Fonts},
     services::cas_client::CasClient,
+    services::chat_config_service::{self, ChatConfigService},
     services::moderation_service::ModerationService,
     services::openai_client::OpenAiClient,
     services::report_service::ReportService,
@@ -93,11 +94,32 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("seed watched chats")?;
 
-    // Hot-reload subscription: M4 publishes `chat_config:{chat_id}` invalidations
-    // here when a moderator edits per-chat settings. For now we just log them.
-    let pubsub_handle = redis.subscribe("chat_config:*", cancel.clone(), |channel, payload| {
-        debug!(channel, payload, "chat_config invalidation received");
-    });
+    let chat_config = Arc::new(ChatConfigService::new(db.clone(), redis.clone()));
+
+    // Hot-reload subscription: a write to chat_config via
+    // `ChatConfigService::update` publishes `invalidate` on
+    // `chat_config:{chat_id}`. The closure spawns a tokio task that evicts
+    // the local Moka entry — next `get(chat_id)` re-fetches from Postgres,
+    // so the bot picks up the new value within ~1s without restart.
+    let chat_config_sub = chat_config.clone();
+    let pubsub_handle =
+        redis.subscribe("chat_config:*", cancel.clone(), move |channel, payload| {
+            match chat_config_service::chat_id_from_channel(&channel) {
+                Some(chat_id) => {
+                    let svc = chat_config_sub.clone();
+                    tokio::spawn(async move {
+                        svc.invalidate(chat_id).await;
+                        debug!(chat_id, channel, payload, "chat_config Moka entry evicted");
+                    });
+                }
+                None => {
+                    warn!(
+                        channel,
+                        "chat_config pub/sub: unparseable channel; ignoring"
+                    );
+                }
+            }
+        });
 
     let fonts = Fonts::load().context("load captcha fonts")?;
     let captcha = Arc::new(CaptchaService::new(db.pool().clone(), fonts));
@@ -108,12 +130,16 @@ async fn main() -> anyhow::Result<()> {
     let bot = Bot::new(config.bot_token.expose());
 
     let cas = CasClient::new(redis.clone(), config.cas_base_url.clone());
-    let spam = Arc::new(SpamService::new(db.pool().clone(), cas));
+    let spam = Arc::new(SpamService::new(
+        db.pool().clone(),
+        cas,
+        chat_config.clone(),
+    ));
     let moderation = ModerationService::new(db.pool().clone(), bot.clone());
 
     let reports = Arc::new(ReportService::new(db.pool().clone()));
     let openai = Arc::new(OpenAiClient::new(config.openai_base_url.clone()));
-    let summary = SummaryService::new(db.pool().clone(), openai);
+    let summary = SummaryService::new(db.pool().clone(), openai, chat_config.clone());
 
     let state = AppState {
         config: config.clone(),
@@ -125,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
         moderation: moderation.clone(),
         reports: reports.clone(),
         summary: summary.clone(),
+        chat_config: chat_config.clone(),
     };
 
     let http_handle = spawn_http(&config.address, state.clone(), cancel.clone())

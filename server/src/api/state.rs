@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::database::{Database, Redis};
 use crate::services::captcha::{CaptchaService, CaptchaState};
+use crate::services::chat_config_service::ChatConfigService;
 use crate::services::moderation_service::ModerationService;
 use crate::services::report_service::ReportService;
 use crate::services::spam::service::SpamService;
@@ -34,4 +35,9 @@ pub struct AppState {
     /// M3 AI summary: per-chat OpenAI key resolved at call time, daily
     /// token budget enforced via `daily_stats('openai_tokens_used')`.
     pub summary: Arc<SummaryService>,
+    /// M4 per-chat config service: Moka cache + Postgres source of truth +
+    /// Redis `chat_config:{chat_id}` pub/sub for cross-replica invalidation.
+    /// Every read of `chat_config` goes through this service so config
+    /// edits land within ~1s without restart.
+    pub chat_config: Arc<ChatConfigService>,
 }

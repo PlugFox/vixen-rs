@@ -13,6 +13,152 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ### Added
 
+- M4 web foundation: auth + hot-reload config. Server validates Telegram
+  `initData` HMAC (WebApp shape and Login Widget shape), mints a 1h HS256
+  JWT, and exposes per-chat config CRUD over `/api/v1/chats/{chat_id}/config`.
+  Writes run inside a `SELECT … FOR UPDATE` + `UPDATE` transaction, publish
+  `invalidate` on Redis `chat_config:{chat_id}`, refresh the local Moka entry
+  and return the updated row. The subscribe loop in `bin/server.rs` parses
+  the `chat_id` out of the channel name and evicts the local entry — every
+  replica picks up the new value within ~1s without restart. End-to-end
+  integration test `tests/chat_config_hot_reload.rs` asserts the 1s SLA holds
+  between two `ChatConfigService` instances backed by the same Postgres and
+  Redis. (server)
+- `services/auth_service.rs` — Telegram WebApp `initData` HMAC validation
+  (`secret = HMAC_SHA256("WebAppData", bot_token)`), Telegram Login Widget
+  validation (`secret = SHA256(bot_token)` per the legacy widget protocol),
+  HS256 JWT mint/decode with `{sub, exp, iat, chat_ids, tg}` claims. Hash
+  compare uses `subtle::ConstantTimeEq`. Public helper `chats_for(pool,
+  user_id)` resolves the `chat_ids` claim from `chat_moderators`. 12 unit
+  tests cover happy path + tampered hash + expired `auth_date` + unknown
+  shape + missing hash for both payload shapes plus JWT mint/decode/expired/
+  wrong-secret. (server)
+- `services/chat_config_service.rs` + `models/chat_config.rs` — strongly
+  typed `ChatConfig` DTO, `ChatConfigDto` (masks `openai_api_key` with a
+  `openai_api_key_set: bool`), and `ChatConfigPatch` with three-state
+  partial PATCH semantics (`Option<Option<T>>` for nullable `openai_api_key`:
+  absent = leave, `null` = clear, value = set). `ChatConfigService::get`
+  reads via Moka 1h front + Postgres fallback; `update` runs the locking
+  transaction, publishes on the pub/sub channel and refreshes the local
+  cache. Public `invalidate(chat_id)` is what `bin/server.rs` calls from
+  the subscribe loop. Patch validation mirrors every PG CHECK constraint so
+  out-of-range values return 400 instead of 500. (server)
+- HTTP endpoints: `POST /api/v1/auth/telegram/login`, `GET /api/v1/auth/me`,
+  `GET /api/v1/chats`, `GET /api/v1/chats/{chat_id}/config`,
+  `PATCH /api/v1/chats/{chat_id}/config`, `POST /admin/ping`. All
+  `utoipa`-documented; bearer (`Authorization: Bearer <jwt>`) and admin
+  secret (`X-Admin-Secret`) schemes registered on the OpenAPI spec so the
+  Scalar UI's "Authorize" affordance offers both. `/api/v1/chats` returns
+  only the intersection of the JWT's `chat_ids` claim with the rows
+  currently in the `chats` table — a chat dropped from `CONFIG_CHATS`
+  between login and request immediately stops appearing. (server)
+- `api/webapp_auth_middleware.rs` — `Authorization: Bearer <jwt>` validator
+  injecting an `AuthContext { user_id, chat_ids, username, first_name,
+  last_name }` into request extensions. `AuthContext::can_access(chat_id)`
+  is the per-route IDOR guard used by every chat-scoped handler.
+  (server)
+- `api/admin_secret_middleware.rs` — `X-Admin-Secret` validator. Both sides
+  of the comparison hash through SHA-256 first so `ConstantTimeEq` runs on
+  equal-length 32-byte buffers; the secret's length is not leaked through
+  early-exit timing. 503 when `CONFIG_ADMIN_SECRET` is unset. (server)
+- Six chat_config read sites now go through `ChatConfigService::get` so
+  bot-side reads share the cache with the API: `telegram/handlers/
+  commands.rs` (`chat_language_str`, `fetch_lang_and_summary`),
+  `telegram/handlers/message_gate.rs` (`log_allowed_message`),
+  `services/summary_service.rs` (`fetch_config`), `services/spam/
+  service.rs` (cascade entry), `jobs/daily_report.rs` (`fetch_schedule_
+  config`, `current_report_date{,_with_tz}`). A PATCH from the dashboard
+  reaches the bot's next read within ~1s. (server)
+- Integration tests: `tests/chat_config_service.rs` (9 cases — get default
+  / NotFound / update single + multi-field / openai_api_key three-state /
+  empty patch / out-of-range / update on missing chat / cache-refresh-on-
+  update), `tests/chat_config_hot_reload.rs` (1 case — `update` propagates
+  to a separate `ChatConfigService` instance within 1s via the Redis
+  pub/sub channel), `tests/routes_m4.rs` (18 cases — login happy /
+  tampered-hash / expired auth_date; /me with/without/bad-signature JWT;
+  /chats returns intersection with claim; GET config defaults + cross-
+  chat 403 + key-mask; PATCH success + null-clear + bad range + empty body
+  + cross-chat 403; /admin/ping happy / no-secret / wrong-secret; and an
+  end-to-end PATCH → next service read sees the flip). All `#[ignore]`-
+  gated and run by CI's `Integration (postgres + redis)` job. (server)
+- `hex = "0.4"` dependency — used by `auth_service` to decode the
+  hex-encoded `hash` field of Telegram `initData`. (server)
+- `models/chat_config::{ChatConfig, ChatConfigDto, ChatConfigPatch,
+  PatchValidationError}` exported via `crate::models`. (server)
+
+### Changed
+
+- `SpamService::new` and `SummaryService::new` now take
+  `Arc<ChatConfigService>` so the cascade and summary paths share the same
+  cache. The inline `ChatSpamConfig` / `SummaryConfig` row-mapping helpers
+  collapse into a single `ChatConfigService::get(chat_id)` call. Test
+  fixtures and `bin/server.rs` updated accordingly. (server)
+- `AppState` gains `chat_config: Arc<ChatConfigService>`. (server)
+- `bin/server.rs` Redis subscribe loop on `chat_config:*` is no longer a
+  no-op debug log; it parses the `chat_id` out of the channel name with
+  `chat_config_service::chat_id_from_channel`, spawns a task that calls
+  `chat_config.invalidate(chat_id).await`, and lets the bot pick up the
+  next config edit on its next `get()` call. (server)
+- `jobs::daily_report::current_report_date{,_with_tz}` and
+  `fetch_schedule_config` now take `&AppState` (so they read
+  `chat_config.timezone` through the cache) instead of `&PgPool`. Two
+  callers in `telegram/handlers/commands.rs` (`/stats`, `/report`) updated
+  to pass `&state`. (server)
+- `cargo` version bumped to `0.5.0` (minor — new API surface). (server)
+
+### Security
+
+- `openai_api_key` is masked in every API response. `ChatConfigDto` exposes
+  `openai_api_key_set: bool` instead of the raw key, and the JSON body for
+  a successful PATCH that sets the key does not echo the value back.
+  Combined with the existing `secret_newtype!` Display/Debug redaction, an
+  accidental `tracing::debug!(?cfg)` cannot leak the secret either.
+  (server)
+- `ChatConfig::Debug` now redacts `openai_api_key`. `derive(Debug)`
+  previously emitted the raw `Some("sk-…")` form via any
+  `tracing::debug!(?cfg)`, `panic!` payload or test failure that formatted
+  the row. The manual impl masks the field as `***redacted***` when set
+  and leaves every non-secret column intact. (server)
+- `Config::validate` now rejects an empty `CONFIG_ADMIN_SECRET` and an
+  empty `CONFIG_JWT_SECRET` in every environment. The middleware's
+  constant-time compare hashes both sides through SHA-256, which means a
+  configured `""` previously authenticated any request that omitted
+  `X-Admin-Secret` (`SHA256("") == SHA256("")`). `admin_secret_middleware`
+  also got a defense-in-depth guard: an empty configured secret in the
+  AppState now returns 503 even if config validation was skipped (e.g. a
+  hand-rolled test fixture). (server)
+
+### Fixed
+
+- `ChatConfigPatch` deserialization rejects explicit `null` for every
+  non-nullable field. Previously `{"captcha_enabled": null}` deserialized
+  to `None` and was silently treated as "field absent / leave alone",
+  which would mask client typos. Only `openai_api_key` keeps the
+  three-state `Option<Option<String>>` semantics — `null` is the
+  documented "clear the key" value there. (server)
+- `ChatConfigPatch::validate` now rejects `openai_model` and `timezone`
+  longer than 64 bytes (the column width). A long string previously
+  bubbled up as a generic PG "value too long" error mapped to 500 by the
+  route, instead of the intended 400. (server)
+- `ChatConfigService::update` no longer writes the post-commit row into
+  Moka. Under interleaved commits (`tx_A` commits first, `tx_B` second),
+  the `cache.insert` calls could race so that `tx_A`'s slower insert
+  landed after `tx_B`'s, leaving the replica serving the stale `tx_A`
+  snapshot until the next pub/sub invalidation or TTL. The new code only
+  evicts the local entry — the next `get()` re-reads from Postgres,
+  which is always coherent. One extra SELECT per update on this replica,
+  zero on the rest (they evict via pub/sub as before). (server)
+- `message_gate::log_allowed_message` no longer swallows DB / cache
+  outages as `enabled = false`. Only `ChatConfigError::NotFound` falls
+  back to false; every other error propagates up the anyhow chain so an
+  outage stays visible instead of silently disabling
+  `log_allowed_messages` for every chat. (server)
+- `tests/chat_config_hot_reload.rs` starts the propagation timer *after*
+  `writer.update()` returns. The previous version measured the writer's
+  DB write and Redis publish inside the 1s budget, which could produce
+  false negatives on a slow CI runner; the pub/sub propagation itself
+  fits inside the budget by a wide margin. (server)
+
 - M3 daily reports. Per-chat scheduler fires at the chat-local hour
   (`chat_config.report_hour` in `chat_config.timezone`), aggregates the
   chat-local day from `daily_stats` + `moderation_actions` +

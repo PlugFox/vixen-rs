@@ -1,0 +1,154 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE chat_config SET\n                captcha_enabled       = COALESCE($2, captcha_enabled),\n                captcha_lifetime_secs = COALESCE($3, captcha_lifetime_secs),\n                captcha_attempts      = COALESCE($4, captcha_attempts),\n                spam_enabled          = COALESCE($5, spam_enabled),\n                spam_threshold        = COALESCE($6, spam_threshold),\n                spam_weights          = COALESCE($7, spam_weights),\n                cas_enabled           = COALESCE($8, cas_enabled),\n                clown_chance          = COALESCE($9, clown_chance),\n                log_allowed_messages  = COALESCE($10, log_allowed_messages),\n                report_hour           = COALESCE($11, report_hour),\n                timezone              = COALESCE($12, timezone),\n                summary_enabled       = COALESCE($13, summary_enabled),\n                summary_token_budget  = COALESCE($14, summary_token_budget),\n                report_min_activity   = COALESCE($15, report_min_activity),\n                openai_api_key        = CASE WHEN $16::bool THEN $17::text ELSE openai_api_key END,\n                openai_model          = COALESCE($18, openai_model),\n                language              = COALESCE($19, language)\n            WHERE chat_id = $1\n            RETURNING\n                chat_id,\n                captcha_enabled,\n                captcha_lifetime_secs,\n                captcha_attempts,\n                spam_enabled,\n                spam_threshold,\n                spam_weights,\n                cas_enabled,\n                clown_chance,\n                log_allowed_messages,\n                report_hour,\n                timezone,\n                summary_enabled,\n                summary_token_budget,\n                report_min_activity,\n                openai_api_key,\n                openai_model,\n                language,\n                created_at,\n                updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "captcha_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "captcha_lifetime_secs",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "captcha_attempts",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "spam_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "spam_threshold",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "spam_weights",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "cas_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "clown_chance",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 9,
+        "name": "log_allowed_messages",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "report_hour",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 11,
+        "name": "timezone",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "summary_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "summary_token_budget",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "report_min_activity",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 15,
+        "name": "openai_api_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "openai_model",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "language",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool",
+        "Int4",
+        "Int2",
+        "Bool",
+        "Float4",
+        "Jsonb",
+        "Bool",
+        "Int2",
+        "Bool",
+        "Int2",
+        "Varchar",
+        "Bool",
+        "Int4",
+        "Int2",
+        "Bool",
+        "Text",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "995d6caa9894fd7cd7d4976f9c6bb4d60cc12899d4cafcbe9cd6e9922fc30607"
+}

@@ -16,7 +16,9 @@
 //! routes the verdict through `ModerationService::apply` so the ledger
 //! write and the bot side-effect stay in one place.
 
-use anyhow::{Context, Result};
+use std::sync::Arc;
+
+use anyhow::Result;
 use chrono::{Duration, Utc};
 use serde_json::json;
 use sqlx::PgPool;
@@ -25,6 +27,7 @@ use tracing::{debug, instrument};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::services::cas_client::{CasClient, Verdict as CasVerdict};
+use crate::services::chat_config_service::{ChatConfigError, ChatConfigService};
 use crate::services::spam::dedup::{self, DedupOutcome};
 use crate::services::spam::normalize;
 use crate::services::spam::phrases::{PHRASES, SpamWeights};
@@ -63,11 +66,16 @@ impl Verdict {
 pub struct SpamService {
     db: PgPool,
     cas: CasClient,
+    chat_config: Arc<ChatConfigService>,
 }
 
 impl SpamService {
-    pub fn new(db: PgPool, cas: CasClient) -> Self {
-        Self { db, cas }
+    pub fn new(db: PgPool, cas: CasClient, chat_config: Arc<ChatConfigService>) -> Self {
+        Self {
+            db,
+            cas,
+            chat_config,
+        }
     }
 
     #[instrument(
@@ -87,9 +95,13 @@ impl SpamService {
         };
 
         let chat_id = msg.chat.id.0;
-        let cfg = match self.fetch_config(chat_id).await? {
-            Some(c) if c.spam_enabled => c,
-            _ => return Ok(Verdict::Allow),
+        let cfg = match self.chat_config.get(chat_id).await {
+            Ok(c) if c.spam_enabled => c,
+            Ok(_) => return Ok(Verdict::Allow),
+            Err(ChatConfigError::NotFound(_)) => return Ok(Verdict::Allow),
+            Err(e) => {
+                return Err(anyhow::Error::new(e).context("chat_config (spam)"));
+            }
         };
 
         let normalized = normalize::normalize(text);
@@ -153,31 +165,4 @@ impl SpamService {
 
         Ok(Verdict::Allow)
     }
-
-    async fn fetch_config(&self, chat_id: i64) -> Result<Option<ChatSpamConfig>> {
-        let row = sqlx::query_as!(
-            ChatSpamConfig,
-            r#"
-            SELECT
-                spam_enabled    AS "spam_enabled!",
-                spam_threshold  AS "spam_threshold!",
-                spam_weights    AS "spam_weights!: serde_json::Value",
-                cas_enabled     AS "cas_enabled!"
-            FROM chat_config
-            WHERE chat_id = $1
-            "#,
-            chat_id,
-        )
-        .fetch_optional(&self.db)
-        .await
-        .context("SELECT chat_config")?;
-        Ok(row)
-    }
-}
-
-struct ChatSpamConfig {
-    spam_enabled: bool,
-    spam_threshold: f32,
-    spam_weights: serde_json::Value,
-    cas_enabled: bool,
 }

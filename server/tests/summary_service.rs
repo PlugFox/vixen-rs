@@ -11,15 +11,22 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use serde_json::json;
 use sqlx::PgPool;
+use vixen_server::database::Database;
 use vixen_server::models::daily_stats::{self, Metric};
+use vixen_server::services::chat_config_service::ChatConfigService;
 use vixen_server::services::openai_client::OpenAiClient;
 use vixen_server::services::summary_service::{SkipReason, SummaryOutcome, SummaryService};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 async fn build_service(pool: PgPool, base_url: String) -> Arc<SummaryService> {
+    let redis_url =
+        std::env::var("CONFIG_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis = fresh_redis(&redis_url).await;
+    let db = Arc::new(Database::from_pool(pool.clone()));
+    let chat_config = Arc::new(ChatConfigService::new(db, redis));
     let client = Arc::new(OpenAiClient::new(base_url));
-    SummaryService::new(pool, client)
+    SummaryService::new(pool, client, chat_config)
 }
 
 async fn seed_summary_chat(

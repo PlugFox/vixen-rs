@@ -2,6 +2,7 @@
 //! that own each table — see `server/docs/database.md` for the schema.
 
 pub mod captcha_challenge;
+pub mod chat_config;
 pub mod daily_stats;
 pub mod moderation_action;
 pub mod report;
@@ -9,6 +10,7 @@ pub mod report_message;
 pub mod verified_user;
 
 pub use captcha_challenge::CaptchaChallenge;
+pub use chat_config::{ChatConfig, ChatConfigDto, ChatConfigPatch, PatchValidationError};
 pub use daily_stats::Metric;
 pub use moderation_action::{ActorKind, ModerationAction, ModerationActionKind};
 pub use report::{CaptchaCounts, DailyPoint, ReportData, TopPhrase};
