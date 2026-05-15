@@ -237,7 +237,10 @@ export function SettingsForm(props: SettingsFormProps) {
               label={settings["field.spam_enabled.label"]}
               hint={settings["field.spam_enabled.hint"]}
             >
-              <Switch checked={!!draft.spam_enabled} onChange={(v: boolean) => set("spam_enabled", v)} />
+              <Switch
+                checked={!!draft.spam_enabled}
+                onChange={(v: boolean) => set("spam_enabled", v)}
+              />
             </FieldRow>
             <FieldRow
               label={settings["field.spam_threshold.label"]}
@@ -255,7 +258,10 @@ export function SettingsForm(props: SettingsFormProps) {
               label={settings["field.cas_enabled.label"]}
               hint={settings["field.cas_enabled.hint"]}
             >
-              <Switch checked={!!draft.cas_enabled} onChange={(v: boolean) => set("cas_enabled", v)} />
+              <Switch
+                checked={!!draft.cas_enabled}
+                onChange={(v: boolean) => set("cas_enabled", v)}
+              />
             </FieldRow>
             <FieldRow
               label={settings["field.spam_weights.label"]}
