@@ -1,5 +1,5 @@
 import { useLocation, useParams } from "@solidjs/router";
-import { type JSX, createMemo, createResource, Show } from "solid-js";
+import { createMemo, createResource, type JSX, Show } from "solid-js";
 import { Protected } from "@/features/auth/components/protected";
 import { chatsApi } from "@/features/chats/api";
 import { ChatHeader } from "@/features/chats/components/chat-header";

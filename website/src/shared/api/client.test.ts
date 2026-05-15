@@ -15,7 +15,10 @@ describe("createApiClient", () => {
   });
 
   it("unwraps the success envelope", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ status: "ok", data: { x: 1 } })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ status: "ok", data: { x: 1 } })),
+    );
     const api = createApiClient({ baseUrl: "http://localhost/api" });
     const result = await api.get<{ x: number }>("/test");
     expect(result.x).toBe(1);
