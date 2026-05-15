@@ -11,6 +11,62 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
 
 ## [Unreleased]
 
+### Fixed
+
+- **PR #99 Copilot review — 12 bug fixes across server + website.**
+  - `routes_moderation::list_banned` CTE and `routes_chats::get_stats`
+    banned_count subquery now include an `id DESC` tie-breaker in
+    `DISTINCT ON`. Without it, a tied `(created_at, action)` pair from one
+    transaction was resolved non-deterministically, so the same dataset
+    could flip a user in/out of "banned" between query runs. Regression
+    test `banned_list_id_tie_breaker_when_created_at_ties` seeds two
+    actions with identical `created_at` and explicit UUIDs to force the
+    tie path. (server)
+  - `tests/routes_moderation.rs::ban_then_double_ban_returns_already_applied`
+    rewritten — the old version skipped its assertion when the dummy bot
+    endpoint surfaced an error envelope, letting the idempotency contract
+    regress silently. The replacement pre-seeds the ledger row directly
+    and asserts `outcome: "already_applied"` plus a row-count check —
+    no dependency on the bot endpoint. (server)
+  - `commands_info` now explicitly documents and tells the user that
+    `@username` is NOT supported (Telegram doesn't expose a reliable
+    username→id resolver to bots). PR description / CHANGELOG / test plan
+    realigned with the actual `<user_id>` / reply target resolution.
+    (server)
+  - `shared/api/interceptors.ts::createAuthInterceptor` —
+    1) skip reauth for `/auth/telegram/login` and `/auth/me` to break the
+       recursive loop a failing initData submission used to trigger
+       (`reauth()` → `signInWithInitData()` → same endpoint → another
+       401 → ...);
+    2) snapshot the request body to an `ArrayBuffer` BEFORE the first
+       fetch — `req.body` is a one-shot stream and the retried mutation
+       used to be sent without its payload.
+    6 new vitest cases cover the no-loop, body-replay, mutex dedup, and
+    header-injection paths. (website)
+  - `features/settings/components/settings-form.tsx` —
+    1) `onMount` returning a cleanup function does not register disposal
+       in Solid; the `window.focus` listener now uses `onCleanup` and no
+       longer leaks every time the user navigates between chats;
+    2) numeric `set()` rejects non-finite values — clearing a number
+       input previously stored `NaN`, which `JSON.stringify` serialises
+       to `null`, and the server rejected the PATCH with 400;
+    3) drop the `auto` language option — the server's chat_config check
+       constraint accepts only `en` / `ru`, so the choice would always
+       400. (website)
+  - `package.json` scripts now run `bun run i18n:gen` before `dev`,
+    `build`, `typecheck`, `test`, `test:watch`, `test:coverage` — the
+    generated `src/shared/i18n/generated/` directory is gitignored, so a
+    fresh checkout used to fail until the developer manually ran the
+    codegen. (website)
+  - `shared/ui/dialog.tsx` — moved the close-button `aria-label` from
+    the inner SVG to the `KDialog.CloseButton` itself; the SVG carries
+    `aria-hidden="true"`. Screen-reader announce-as-unlabeled regression
+    closed. (website)
+  - `features/moderation/components/audit-filters.tsx` reset button is
+    now labeled with `moderation.filters.reset` rather than the generic
+    `common.cancel` — the button resets filters, it doesn't cancel a
+    pending edit. (website)
+
 ### Added
 
 - M5 — moderator dashboard. SolidJS + Kobalte + Tailwind v4 + CVA SPA that

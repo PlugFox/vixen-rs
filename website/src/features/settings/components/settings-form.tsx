@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, onMount, Show } from "solid-js";
+import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { ApiError } from "@/shared/api";
 import { common, errors, settings } from "@/shared/i18n/generated";
@@ -36,10 +36,13 @@ function FieldRow(props: FieldRowProps) {
   );
 }
 
+// Server accepts only "en" or "ru" — `chat_config.language` has a CHECK
+// constraint plus a serde-side validator that rejects anything else.
+// Exposing "auto" here would let users pick a value that PATCH always
+// rejects with 400 PATCH_VALIDATION.
 const LANGUAGE_OPTIONS = [
   { value: "en", label: "English" },
   { value: "ru", label: "Русский" },
-  { value: "auto", label: "Auto" },
 ] as const;
 
 export function SettingsForm(props: SettingsFormProps) {
@@ -58,11 +61,15 @@ export function SettingsForm(props: SettingsFormProps) {
   onMount(() => {
     const cur = resource();
     if (cur) applyServerState(cur);
-    // Refetch on window focus so other-tab edits propagate.
-    const refresh = () => refetch();
-    window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
   });
+
+  // Refetch on window focus so other-tab edits propagate. `onMount` returning
+  // a function does NOT register disposal in Solid — we must use `onCleanup`
+  // explicitly, otherwise the listener leaks every time the user navigates
+  // between chats.
+  const refresh = () => refetch();
+  window.addEventListener("focus", refresh);
+  onCleanup(() => window.removeEventListener("focus", refresh));
 
   // Whenever the resource resolves (initial or after refetch), reset the
   // draft only if the user hasn't started editing. The hidden resource is
@@ -73,6 +80,12 @@ export function SettingsForm(props: SettingsFormProps) {
   });
 
   function set<K extends keyof ChatConfigDto>(key: K, value: ChatConfigDto[K]) {
+    // NaN guard: `Number.parseInt("", 10)` and `Number.parseFloat("")` both
+    // return NaN, and `JSON.stringify(NaN) === "null"`. Without this guard
+    // clearing a numeric input and pressing Save would send `null` for a
+    // non-nullable field and the server would 400 `PATCH_VALIDATION`. Drop
+    // the update silently — the draft keeps the previous numeric value.
+    if (typeof value === "number" && !Number.isFinite(value)) return;
     setDraft(key as keyof ChatConfigDto, value);
     setDirty(true);
   }

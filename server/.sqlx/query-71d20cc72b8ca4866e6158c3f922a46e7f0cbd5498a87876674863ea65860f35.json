@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH last_action AS (\n            SELECT DISTINCT ON (target_user_id)\n                target_user_id,\n                action AS last_action,\n                created_at AS last_at,\n                reason\n            FROM moderation_actions\n            WHERE chat_id = $1 AND action IN ('ban', 'unban')\n            ORDER BY target_user_id, created_at DESC, id DESC\n        )\n        SELECT\n            target_user_id AS \"user_id!\",\n            last_at        AS \"banned_at!\",\n            reason\n        FROM last_action\n        WHERE last_action = 'ban'\n          AND (\n              $2::timestamptz IS NULL\n              OR (last_at, target_user_id) < ($2, $3)\n          )\n        ORDER BY last_at DESC, target_user_id DESC\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "banned_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "71d20cc72b8ca4866e6158c3f922a46e7f0cbd5498a87876674863ea65860f35"
+}

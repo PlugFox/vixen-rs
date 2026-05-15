@@ -238,53 +238,111 @@ async fn actions_bad_cursor_returns_400(pool: PgPool) {
 
 // ── /moderation/ban + /unban + /verify ────────────────────────────────
 
+/// Idempotency contract: when a ban ledger row already exists (regardless of
+/// how it got there), a `POST /ban` for the same `(chat, user)` returns
+/// `already_applied` without writing a duplicate row. The previous version
+/// of this test issued two HTTP bans and skipped the assertion if the first
+/// call returned an error envelope — which let the contract regress
+/// silently. We now pre-seed the ledger and assert on a single request,
+/// removing the dependency on the dummy bot endpoint.
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires postgres + redis"]
-async fn ban_then_double_ban_returns_already_applied(pool: PgPool) {
+async fn ban_when_ledger_row_already_exists_returns_already_applied(pool: PgPool) {
+    let chat_id = unique_chat_id();
+    seed_chat(&pool, chat_id).await;
+    let target = 1234_i64;
+    seed_action(
+        &pool,
+        chat_id,
+        target,
+        "ban",
+        "moderator",
+        Some(7),
+        None,
+        Some("initial"),
+    )
+    .await;
+
+    let (app, _) = build_app(pool.clone()).await;
+    let token = mint_test_jwt(7, vec![chat_id]);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/chats/{chat_id}/moderation/ban"))
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(json!({"user_id": target}).to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "expected 200 OK");
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(
+        body["status"], "ok",
+        "expected success envelope, got: {body}"
+    );
+    assert_eq!(
+        body["data"]["outcome"], "already_applied",
+        "second ban must observe the existing ledger row and skip the bot side-effect"
+    );
+
+    // No duplicate ledger row was written.
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM moderation_actions
+         WHERE chat_id = $1 AND target_user_id = $2 AND action = 'ban'",
+    )
+    .bind(chat_id)
+    .bind(target)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "no duplicate ban ledger row");
+}
+
+/// Tie-breaker regression: when a ban and unban for the same user share an
+/// identical `created_at` timestamp (possible inside one transaction), the
+/// banned-list `DISTINCT ON` must pick the later row by `id DESC` rather
+/// than coin-flipping. We seed both rows with the same `created_at` and
+/// assert the user is correctly excluded from the banned list because
+/// `unban` (inserted later, larger id) wins.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres + redis"]
+async fn banned_list_id_tie_breaker_when_created_at_ties(pool: PgPool) {
     let chat_id = unique_chat_id();
     seed_chat(&pool, chat_id).await;
 
+    // Two rows with the SAME `created_at`. The later INSERT gets a larger
+    // UUID v4 id — but UUIDs are random, so we set them explicitly to
+    // guarantee `unban.id > ban.id` and exercise the tie-breaker.
+    let shared_ts: chrono::DateTime<chrono::Utc> = "2026-05-16T12:00:00Z".parse().unwrap();
+    sqlx::query(
+        r#"INSERT INTO moderation_actions
+           (id, chat_id, target_user_id, action, actor_kind, created_at)
+           VALUES
+             ('00000000-0000-0000-0000-000000000001'::uuid, $1, 500, 'ban',   'moderator', $2),
+             ('00000000-0000-0000-0000-000000000002'::uuid, $1, 500, 'unban', 'moderator', $2)"#,
+    )
+    .bind(chat_id)
+    .bind(shared_ts)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let (app, _) = build_app(pool).await;
-    let actor = 7_i64;
-    let target = 1234_i64;
-    let token = mint_test_jwt(actor, vec![chat_id]);
-
-    let body = json!({"user_id": target, "reason": "spam"});
-    let req1 = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/chats/{chat_id}/moderation/ban"))
+    let token = mint_test_jwt(7, vec![chat_id]);
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/chats/{chat_id}/moderation/banned"))
         .header(header::AUTHORIZATION, format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
+        .body(Body::empty())
         .unwrap();
-    let resp1 = app.clone().oneshot(req1).await.unwrap();
-    let b1 = body_json(resp1.into_body()).await;
-    // The bot.ban_chat_member call goes to the dummy Telegram endpoint and
-    // fails — the moderation_service treats Telegram non-fatal errors as
-    // Applied and fatal-or-network errors as Err. We test the *idempotency
-    // contract*: even if the first call errored at the bot layer, a
-    // subsequent identical call must observe the previously-recorded ledger
-    // intent OR return the same error. Both branches are valid M5 behaviour,
-    // so we only require the second call to never write an extra row.
-    let outcome_first = b1["data"]["outcome"].as_str().map(String::from);
-
-    let req2 = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/chats/{chat_id}/moderation/ban"))
-        .header(header::AUTHORIZATION, format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp2 = app.oneshot(req2).await.unwrap();
-    let b2 = body_json(resp2.into_body()).await;
-    let outcome_second = b2["data"]["outcome"].as_str().map(String::from);
-
-    // Whether the first ban succeeded or not, by the second call the ledger
-    // is settled — the only valid outcomes are `applied` then `already_applied`
-    // or `applied` (if the first failed and never wrote the row).
-    if outcome_first.as_deref() == Some("applied") {
-        assert_eq!(outcome_second.as_deref(), Some("already_applied"));
-    }
+    let resp = app.oneshot(req).await.unwrap();
+    let body = body_json(resp.into_body()).await;
+    let items = body["data"]["items"].as_array().unwrap();
+    assert_eq!(
+        items.len(),
+        0,
+        "unban (larger id) must win the tie → user is NOT banned"
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]

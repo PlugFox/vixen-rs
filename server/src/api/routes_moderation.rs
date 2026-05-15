@@ -604,6 +604,12 @@ pub async fn list_banned(
     // "Banned" = users whose *most recent terminal action* is `ban` (not
     // `unban`). The CTE picks the latest of {ban, unban} per user, the
     // outer SELECT filters to ban and keyset-paginates.
+    //
+    // `id DESC` is the tie-breaker — TIMESTAMPTZ has microsecond precision
+    // but two ledger rows produced by the same transaction can land on
+    // identical `created_at` values. Without the tie-breaker `DISTINCT ON`
+    // would pick either row non-deterministically, so a tied ban+unban
+    // would flip which one wins between query runs.
     let rows = match sqlx::query!(
         r#"
         WITH last_action AS (
@@ -614,7 +620,7 @@ pub async fn list_banned(
                 reason
             FROM moderation_actions
             WHERE chat_id = $1 AND action IN ('ban', 'unban')
-            ORDER BY target_user_id, created_at DESC
+            ORDER BY target_user_id, created_at DESC, id DESC
         )
         SELECT
             target_user_id AS "user_id!",

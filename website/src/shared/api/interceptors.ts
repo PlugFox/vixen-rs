@@ -14,7 +14,29 @@ import { ApiError } from "./types";
  *
  * The interceptor never persists tokens to localStorage — per CLAUDE.md JWTs
  * live only in memory.
+ *
+ * Two non-obvious guards (Copilot review on PR #99):
+ *  - **Auth-endpoint skip**: `reauth()` itself calls `signInWithInitData()`
+ *    which hits `/auth/telegram/login`. Without this guard a failing login
+ *    re-enters the interceptor, calls `reauth()` again, and loops. We
+ *    therefore short-circuit on the auth-endpoint URLs and bubble the 401
+ *    straight up.
+ *  - **Body snapshot**: `req.body` is a one-shot stream. After `next(req)`
+ *    consumes it the retry's `new Request(...)` would send the mutation
+ *    without a body. We snapshot to an `ArrayBuffer` once before the first
+ *    fetch and reuse it across the retry.
  */
+const AUTH_ENDPOINT_SUFFIXES = ["/auth/telegram/login", "/auth/me"] as const;
+
+function isAuthEndpoint(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return AUTH_ENDPOINT_SUFFIXES.some((s) => path.endsWith(s));
+  } catch {
+    return false;
+  }
+}
+
 export function createAuthInterceptor(
   getToken: () => string | null,
   reauth: () => Promise<string>,
@@ -22,21 +44,26 @@ export function createAuthInterceptor(
   let mutex: Promise<string> | null = null;
 
   return async (req, next) => {
-    const token = getToken();
-    const withAuth = (t: string | null) => {
-      if (!t) return req;
+    const skipReauth = isAuthEndpoint(req.url);
+
+    // Snapshot the body before any fetch consumes it. GET / DELETE have
+    // `req.body === null` so the snapshot stays `null` and the retry
+    // builds a fresh Request without a body.
+    const bodySnapshot = req.body ? await req.clone().arrayBuffer() : null;
+
+    const buildRequest = (t: string | null): Request => {
       const headers = new Headers(req.headers);
-      headers.set("authorization", `Bearer ${t}`);
+      if (t) headers.set("authorization", `Bearer ${t}`);
       return new Request(req.url, {
         method: req.method,
         headers,
-        body: req.body,
+        body: bodySnapshot,
         signal: req.signal,
       });
     };
 
-    const res = await next(withAuth(token));
-    if (res.status !== 401) return res;
+    const res = await next(buildRequest(getToken()));
+    if (res.status !== 401 || skipReauth) return res;
 
     // Drain the body so the connection can be reused.
     try {
@@ -54,7 +81,7 @@ export function createAuthInterceptor(
     } catch (e) {
       throw new ApiError(401, "REAUTH_FAILED", e instanceof Error ? e.message : "reauth failed");
     }
-    return next(withAuth(fresh));
+    return next(buildRequest(fresh));
   };
 }
 
@@ -62,6 +89,11 @@ export function createAuthInterceptor(
  * Adds `X-Request-ID` to every outbound request. The server echoes it back
  * via the `x-request-id` middleware; surfacing it in logs makes
  * client/server correlation possible.
+ *
+ * Body is forwarded by reference — this interceptor lives **above** the
+ * auth interceptor in the chain, so the auth-side body snapshot will
+ * happen on the (still-unread) stream we hand down. Don't re-snapshot
+ * here or the cost doubles on every request.
  */
 export const requestIdInterceptor: Interceptor = (req, next) => {
   const headers = new Headers(req.headers);

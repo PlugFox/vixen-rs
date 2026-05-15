@@ -1,4 +1,4 @@
-import { common, moderation } from "@/shared/i18n/generated";
+import { moderation } from "@/shared/i18n/generated";
 import { t } from "@/shared/i18n/i18n";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
@@ -64,7 +64,7 @@ export function AuditFiltersForm(props: AuditFiltersProps) {
         />
       </div>
       <Button variant="ghost" onClick={props.onReset}>
-        {t(common.cancel)}
+        {t(moderation["filters.reset"])}
       </Button>
     </div>
   );

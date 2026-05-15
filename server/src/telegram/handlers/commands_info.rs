@@ -1,6 +1,15 @@
-//! `/info <user>` slash command — quick moderation-history reference for a
-//! target user in the current chat. Moderator/admin-gated, same authorisation
-//! gate as `/ban` / `/verify`.
+//! `/info` slash command — quick moderation-history reference for a
+//! target user in the current chat. Moderator/admin-gated, same
+//! authorisation gate as `/ban` / `/verify`.
+//!
+//! Target resolution mirrors `/verify` / `/ban`:
+//!  - Reply-mode: `/info` replied to the target user.
+//!  - Id-mode:    `/info <user_id>` — numeric Telegram user id only.
+//!
+//! `@username` is NOT accepted: Telegram doesn't expose a stable
+//! username→id resolver to bots, so the lookup would be unreliable.
+//! Moderators copy the numeric id from the dashboard's audit log or
+//! verified/banned tabs.
 //!
 //! Output is MarkdownV2-formatted:
 //!
@@ -56,7 +65,11 @@ pub async fn info(
         Some(id) => id,
         None => {
             let _ = bot
-                .send_message(msg.chat.id, "Reply to a user or pass /info <user_id>.")
+                .send_message(
+                    msg.chat.id,
+                    "Reply to a user or pass /info <user_id> \
+                     (numeric Telegram id — @username is not supported).",
+                )
                 .await;
             return Ok(());
         }

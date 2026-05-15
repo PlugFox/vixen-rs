@@ -21,7 +21,12 @@ export function DialogContent(props: ParentProps<{ class?: string }>) {
         {...rest}
       >
         {local.children}
-        <KDialog.CloseButton class="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
+        {/* The accessible name lives on the BUTTON, not the SVG inside — some
+            screen readers ignore aria-label on non-interactive children. */}
+        <KDialog.CloseButton
+          aria-label="Close"
+          class="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring"
+        >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -32,7 +37,7 @@ export function DialogContent(props: ParentProps<{ class?: string }>) {
             stroke-width="2"
             stroke-linecap="round"
             stroke-linejoin="round"
-            aria-label="Close"
+            aria-hidden="true"
           >
             <path d="M18 6L6 18" />
             <path d="M6 6L18 18" />

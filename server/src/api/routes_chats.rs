@@ -141,11 +141,15 @@ pub async fn get_stats(
                                                                             AS "members_count?",
             (SELECT COUNT(*) FROM verified_users WHERE chat_id = $1)
                                                                             AS "verified_count!",
+            -- `id DESC` is the same tie-breaker `list_banned` uses — without
+            -- it `DISTINCT ON` would pick either row non-deterministically
+            -- when a tied ban + unban share `created_at`, and stats could
+            -- disagree with the audit-log derived banned list.
             (SELECT COUNT(*) FROM (
                 SELECT DISTINCT ON (target_user_id) action
                 FROM moderation_actions
                 WHERE chat_id = $1 AND action IN ('ban', 'unban')
-                ORDER BY target_user_id, created_at DESC
+                ORDER BY target_user_id, created_at DESC, id DESC
             ) sub WHERE sub.action = 'ban')                                 AS "banned_count!",
             (SELECT COUNT(*) FROM moderation_actions
                 WHERE chat_id = $1
