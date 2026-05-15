@@ -4738,7 +4738,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vixen-server"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -4750,6 +4750,7 @@ dependencies = [
  "deadpool-redis",
  "dotenvy",
  "futures",
+ "hex",
  "hmac",
  "image 0.25.10",
  "jsonwebtoken",

@@ -28,6 +28,7 @@ use sqlx::PgPool;
 use tracing::{debug, info, instrument, warn};
 
 use crate::models::daily_stats::{self, Metric, ReserveOutcome};
+use crate::services::chat_config_service::{ChatConfigError, ChatConfigService};
 use crate::services::openai_client::{ChatMessage, ChatRole, OpenAiClient};
 
 /// Hard limit on how many `allowed_messages` rows to feed into one summary
@@ -65,11 +66,20 @@ pub enum SkipReason {
 pub struct SummaryService {
     db: PgPool,
     client: Arc<OpenAiClient>,
+    chat_config: Arc<ChatConfigService>,
 }
 
 impl SummaryService {
-    pub fn new(db: PgPool, client: Arc<OpenAiClient>) -> Arc<Self> {
-        Arc::new(Self { db, client })
+    pub fn new(
+        db: PgPool,
+        client: Arc<OpenAiClient>,
+        chat_config: Arc<ChatConfigService>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            db,
+            client,
+            chat_config,
+        })
     }
 
     /// Resolve the per-chat config + budget, build a sanitised prompt, call
@@ -210,24 +220,17 @@ impl SummaryService {
     }
 
     async fn fetch_config(&self, chat_id: i64) -> Result<Option<SummaryConfig>> {
-        let row = sqlx::query_as!(
-            SummaryConfig,
-            r#"
-            SELECT
-                summary_enabled       AS "summary_enabled!",
-                summary_token_budget  AS "summary_token_budget!",
-                openai_api_key,
-                openai_model          AS "openai_model!",
-                log_allowed_messages  AS "log_allowed_messages!"
-            FROM chat_config
-            WHERE chat_id = $1
-            "#,
-            chat_id,
-        )
-        .fetch_optional(&self.db)
-        .await
-        .context("SELECT chat_config (summary)")?;
-        Ok(row)
+        match self.chat_config.get(chat_id).await {
+            Ok(c) => Ok(Some(SummaryConfig {
+                summary_enabled: c.summary_enabled,
+                summary_token_budget: c.summary_token_budget,
+                openai_api_key: c.openai_api_key.clone(),
+                openai_model: c.openai_model.clone(),
+                log_allowed_messages: c.log_allowed_messages,
+            })),
+            Err(ChatConfigError::NotFound(_)) => Ok(None),
+            Err(e) => Err(anyhow::Error::new(e).context("chat_config (summary)")),
+        }
     }
 
     async fn fetch_messages(

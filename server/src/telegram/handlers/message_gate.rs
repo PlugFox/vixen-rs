@@ -287,13 +287,11 @@ async fn log_allowed_message(
     chat_id: i64,
     user_id: i64,
 ) -> anyhow::Result<()> {
-    let enabled: Option<bool> = sqlx::query_scalar!(
-        r#"SELECT log_allowed_messages FROM chat_config WHERE chat_id = $1"#,
-        chat_id,
-    )
-    .fetch_optional(state.db.pool())
-    .await?;
-    if !enabled.unwrap_or(false) {
+    let enabled = match state.chat_config.get(chat_id).await {
+        Ok(c) => c.log_allowed_messages,
+        Err(_) => false,
+    };
+    if !enabled {
         return Ok(());
     }
     let Some(text) = msg.text() else {

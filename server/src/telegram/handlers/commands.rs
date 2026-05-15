@@ -335,7 +335,7 @@ async fn stats(bot: Bot, msg: Message, state: AppState) -> Result<()> {
     // a single chat-local day keeps the displayed counters honest for
     // metrics that don't store per-event timestamps.
     let chat_id = msg.chat.id.0;
-    let (today, tz) = daily_report::current_report_date_with_tz(state.db.pool(), chat_id).await?;
+    let (today, tz) = daily_report::current_report_date_with_tz(&state, chat_id).await?;
     let day_start = report_service::day_window_local(today, tz).0;
     let to = Utc::now();
     let report = state.reports.aggregate(chat_id, day_start, to).await?;
@@ -366,8 +366,7 @@ async fn report(bot: Bot, msg: Message, state: AppState) -> Result<()> {
     }
 
     let chat_id = msg.chat.id.0;
-    let (report_date, tz) =
-        daily_report::current_report_date_with_tz(state.db.pool(), chat_id).await?;
+    let (report_date, tz) = daily_report::current_report_date_with_tz(&state, chat_id).await?;
     let (from, to) = report_service::day_window_local(report_date, tz);
     let aggregated = state.reports.aggregate(chat_id, from, to).await?;
 
@@ -479,27 +478,19 @@ async fn chat_language(state: &AppState, chat_id: i64) -> Lang {
 }
 
 async fn chat_language_str(state: &AppState, chat_id: i64) -> String {
-    match sqlx::query_scalar!(
-        r#"SELECT language FROM chat_config WHERE chat_id = $1"#,
-        chat_id,
-    )
-    .fetch_optional(state.db.pool())
-    .await
-    {
-        Ok(Some(s)) => s,
-        _ => "ru".to_string(),
+    match state.chat_config.get(chat_id).await {
+        Ok(c) => c.language.clone(),
+        Err(_) => "ru".to_string(),
     }
 }
 
 async fn fetch_lang_and_summary(state: &AppState, chat_id: i64) -> Result<Option<(String, bool)>> {
-    let row = sqlx::query!(
-        r#"SELECT language, summary_enabled FROM chat_config WHERE chat_id = $1"#,
-        chat_id,
-    )
-    .fetch_optional(state.db.pool())
-    .await
-    .context("SELECT chat_config (lang+summary)")?;
-    Ok(row.map(|r| (r.language, r.summary_enabled)))
+    use crate::services::chat_config_service::ChatConfigError;
+    match state.chat_config.get(chat_id).await {
+        Ok(c) => Ok(Some((c.language.clone(), c.summary_enabled))),
+        Err(ChatConfigError::NotFound(_)) => Ok(None),
+        Err(e) => Err(anyhow::Error::new(e).context("chat_config (lang+summary)")),
+    }
 }
 
 /// Returns `Some(remaining_secs)` if a cooldown is active, `None` if the
