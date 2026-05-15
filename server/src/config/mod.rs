@@ -175,9 +175,27 @@ impl Config {
                 Some(s) if s.len() < 32 => return Err(ConfigError::JwtSecretTooShort(s.len())),
                 Some(_) => {}
             }
-            if self.admin_secret.is_none() {
-                return Err(ConfigError::MissingAdminSecret);
+            match &self.admin_secret {
+                None => return Err(ConfigError::MissingAdminSecret),
+                Some(s) if s.is_empty() => return Err(ConfigError::EmptyAdminSecret),
+                Some(_) => {}
             }
+        }
+
+        // Even in dev / staging an empty admin secret is a security footgun
+        // (the middleware's SHA-256 compare passes with no `X-Admin-Secret`
+        // header against a `""` configured value). If the operator sets the
+        // var at all, it has to carry a value; absent is fine (middleware
+        // returns 503).
+        if let Some(s) = &self.admin_secret
+            && s.is_empty()
+        {
+            return Err(ConfigError::EmptyAdminSecret);
+        }
+        if let Some(s) = &self.jwt_secret
+            && s.is_empty()
+        {
+            return Err(ConfigError::EmptyJwtSecret);
         }
 
         if self.telegram_mode == "webhook" {
@@ -219,8 +237,12 @@ pub enum ConfigError {
     MissingJwtSecret,
     #[error("CONFIG_JWT_SECRET must be ≥32 bytes in prod (got {0})")]
     JwtSecretTooShort(usize),
+    #[error("CONFIG_JWT_SECRET must not be empty when set")]
+    EmptyJwtSecret,
     #[error("CONFIG_ADMIN_SECRET is required in prod")]
     MissingAdminSecret,
+    #[error("CONFIG_ADMIN_SECRET must not be empty when set")]
+    EmptyAdminSecret,
     #[error("{0} is required when CONFIG_TELEGRAM_MODE=webhook")]
     WebhookMissing(&'static str),
     #[error("CONFIG_DB_MIN_CONNECTIONS ({min}) cannot exceed CONFIG_DB_MAX_CONNECTIONS ({max})")]
@@ -293,6 +315,50 @@ mod tests {
         ]))
         .expect("parses");
         cfg.validate().expect("prod with both secrets passes");
+    }
+
+    #[test]
+    fn rejects_empty_admin_secret_in_any_env() {
+        // Bypass `args()` — it filters out empty values to support
+        // "drop the flag" semantics. We need the flag *present* with the
+        // empty string here.
+        let cfg = Config::try_parse_from([
+            "vixen-server",
+            "--bot-token=12345:abcdefghijklmnopqrstuvwxyz_0-9",
+            "--database-url=postgresql://x:x@localhost/x",
+            "--redis-url=redis://localhost:6379",
+            "--chats=-1001",
+            "--admin-secret=",
+        ])
+        .expect("parses");
+        assert!(matches!(cfg.validate(), Err(ConfigError::EmptyAdminSecret)));
+
+        let cfg = Config::try_parse_from([
+            "vixen-server",
+            "--bot-token=12345:abcdefghijklmnopqrstuvwxyz_0-9",
+            "--database-url=postgresql://x:x@localhost/x",
+            "--redis-url=redis://localhost:6379",
+            "--chats=-1001",
+            "--environment=prod",
+            "--jwt-secret=abcdefghij1234567890ABCDEFGHIJ12",
+            "--admin-secret=",
+        ])
+        .expect("parses");
+        assert!(matches!(cfg.validate(), Err(ConfigError::EmptyAdminSecret)));
+    }
+
+    #[test]
+    fn rejects_empty_jwt_secret_when_set() {
+        let cfg = Config::try_parse_from([
+            "vixen-server",
+            "--bot-token=12345:abcdefghijklmnopqrstuvwxyz_0-9",
+            "--database-url=postgresql://x:x@localhost/x",
+            "--redis-url=redis://localhost:6379",
+            "--chats=-1001",
+            "--jwt-secret=",
+        ])
+        .expect("parses");
+        assert!(matches!(cfg.validate(), Err(ConfigError::EmptyJwtSecret)));
     }
 
     #[test]

@@ -186,9 +186,15 @@ impl ChatConfigService {
             );
         }
 
-        let arc = Arc::new(updated);
-        self.cache.insert(chat_id, arc.clone()).await;
-        Ok(arc)
+        // Invalidate (not insert) the local entry so the next `get` re-reads
+        // from Postgres. A post-commit `cache.insert(updated)` is unsafe
+        // under interleaved commits: tx A and tx B both running this method
+        // can commit in order A → B, but then race on `cache.insert`. If A's
+        // insert lands after B's, the cache regresses to A's stale row until
+        // the TTL or a fresh invalidation kicks in. Re-reading from PG on the
+        // next get costs one extra SELECT but is always coherent.
+        self.cache.invalidate(&chat_id).await;
+        Ok(Arc::new(updated))
     }
 
     /// Evict the local cache entry. Idempotent. Called by the Redis subscribe

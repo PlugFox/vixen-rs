@@ -472,6 +472,53 @@ async fn admin_ping_rejects_wrong_secret(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// Regression: a configured-but-empty `CONFIG_ADMIN_SECRET` previously
+/// authenticated every request that omitted the header (`Sha256("")
+/// == Sha256("")`). `Config::validate` now rejects it at parse time, and
+/// the middleware refuses even when an empty secret slips into AppState
+/// through some other path.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires postgres + redis"]
+async fn admin_ping_refuses_empty_configured_secret(pool: PgPool) {
+    use vixen_server::config::AdminSecret;
+
+    let redis_url =
+        std::env::var("CONFIG_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis = fresh_redis(&redis_url).await;
+    let bot = teloxide::Bot::new(BOT_TOKEN);
+    let mut config = test_config_for_routes(BOT_TOKEN, JWT_SECRET, ADMIN_SECRET);
+    // Bypass `Config::validate` here — we are exactly testing the
+    // defense-in-depth path inside the middleware for the "empty admin
+    // secret somehow reached AppState" scenario.
+    config.admin_secret = Some(AdminSecret::new(""));
+    let state = make_state_with_config(pool, redis, bot, config).await;
+    let app = build_router(state);
+
+    // No X-Admin-Secret header — would historically authenticate via the
+    // `"" == ""` SHA-256 collision.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/admin/ping")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "empty configured secret must short-circuit to 503, not authenticate"
+    );
+
+    // Even sending the matching empty header must fail.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/admin/ping")
+        .header("x-admin-secret", "")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
 // ── End-to-end: PATCH propagates to bot reads via Moka invalidation ─────
 
 #[sqlx::test(migrations = "./migrations")]

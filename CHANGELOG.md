@@ -114,6 +114,50 @@ Each release entry calls out the affected component(s) via a `(server)` / `(webs
   Combined with the existing `secret_newtype!` Display/Debug redaction, an
   accidental `tracing::debug!(?cfg)` cannot leak the secret either.
   (server)
+- `ChatConfig::Debug` now redacts `openai_api_key`. `derive(Debug)`
+  previously emitted the raw `Some("sk-…")` form via any
+  `tracing::debug!(?cfg)`, `panic!` payload or test failure that formatted
+  the row. The manual impl masks the field as `***redacted***` when set
+  and leaves every non-secret column intact. (server)
+- `Config::validate` now rejects an empty `CONFIG_ADMIN_SECRET` and an
+  empty `CONFIG_JWT_SECRET` in every environment. The middleware's
+  constant-time compare hashes both sides through SHA-256, which means a
+  configured `""` previously authenticated any request that omitted
+  `X-Admin-Secret` (`SHA256("") == SHA256("")`). `admin_secret_middleware`
+  also got a defense-in-depth guard: an empty configured secret in the
+  AppState now returns 503 even if config validation was skipped (e.g. a
+  hand-rolled test fixture). (server)
+
+### Fixed
+
+- `ChatConfigPatch` deserialization rejects explicit `null` for every
+  non-nullable field. Previously `{"captcha_enabled": null}` deserialized
+  to `None` and was silently treated as "field absent / leave alone",
+  which would mask client typos. Only `openai_api_key` keeps the
+  three-state `Option<Option<String>>` semantics — `null` is the
+  documented "clear the key" value there. (server)
+- `ChatConfigPatch::validate` now rejects `openai_model` and `timezone`
+  longer than 64 bytes (the column width). A long string previously
+  bubbled up as a generic PG "value too long" error mapped to 500 by the
+  route, instead of the intended 400. (server)
+- `ChatConfigService::update` no longer writes the post-commit row into
+  Moka. Under interleaved commits (`tx_A` commits first, `tx_B` second),
+  the `cache.insert` calls could race so that `tx_A`'s slower insert
+  landed after `tx_B`'s, leaving the replica serving the stale `tx_A`
+  snapshot until the next pub/sub invalidation or TTL. The new code only
+  evicts the local entry — the next `get()` re-reads from Postgres,
+  which is always coherent. One extra SELECT per update on this replica,
+  zero on the rest (they evict via pub/sub as before). (server)
+- `message_gate::log_allowed_message` no longer swallows DB / cache
+  outages as `enabled = false`. Only `ChatConfigError::NotFound` falls
+  back to false; every other error propagates up the anyhow chain so an
+  outage stays visible instead of silently disabling
+  `log_allowed_messages` for every chat. (server)
+- `tests/chat_config_hot_reload.rs` starts the propagation timer *after*
+  `writer.update()` returns. The previous version measured the writer's
+  DB write and Redis publish inside the 1s budget, which could produce
+  false negatives on a slow CI runner; the pub/sub propagation itself
+  fits inside the budget by a wide margin. (server)
 
 - M3 daily reports. Per-chat scheduler fires at the chat-local hour
   (`chat_config.report_hour` in `chat_config.timezone`), aggregates the

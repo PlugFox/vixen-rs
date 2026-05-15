@@ -27,13 +27,21 @@ pub async fn admin_secret_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    let Some(secret) = state.config.admin_secret.as_ref() else {
-        return ApiError {
-            code: "ADMIN_NOT_CONFIGURED".into(),
-            message: "Admin secret is not configured on this server".into(),
-            status: StatusCode::SERVICE_UNAVAILABLE,
+    // Defense in depth: `Config::validate` rejects an empty admin secret in
+    // any environment, but checking here too means a hand-rolled AppState
+    // (e.g. a buggy test fixture) cannot accidentally let an empty
+    // configured secret authenticate every request that omits the header
+    // (both sides collapse to "" before SHA-256 hashing otherwise).
+    let secret_value = match state.config.admin_secret.as_ref() {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return ApiError {
+                code: "ADMIN_NOT_CONFIGURED".into(),
+                message: "Admin secret is not configured on this server".into(),
+                status: StatusCode::SERVICE_UNAVAILABLE,
+            }
+            .into_response();
         }
-        .into_response();
     };
 
     let provided = request
@@ -43,7 +51,7 @@ pub async fn admin_secret_middleware(
         .unwrap_or("");
 
     let provided_hash = Sha256::digest(provided.as_bytes());
-    let expected_hash = Sha256::digest(secret.expose().as_bytes());
+    let expected_hash = Sha256::digest(secret_value.expose().as_bytes());
 
     let matches: bool = provided_hash.ct_eq(&expected_hash).into();
     if !matches {

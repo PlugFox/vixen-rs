@@ -62,8 +62,10 @@ async fn update_propagates_to_subscriber_within_one_second(pool: PgPool) {
         "seed default is captcha_enabled=true"
     );
 
-    // Writer flips the bit.
-    let started = Instant::now();
+    // Writer flips the bit. We start the SLA timer **after** update() returns
+    // so the 1s budget covers only pub/sub propagation + the reader's Moka
+    // eviction — not the writer's DB write + Redis publish latency, which a
+    // slow CI runner can stretch unpredictably.
     writer
         .update(
             chat_id,
@@ -74,8 +76,8 @@ async fn update_propagates_to_subscriber_within_one_second(pool: PgPool) {
         )
         .await
         .unwrap();
+    let started = Instant::now();
 
-    // Poll reader.get until it observes the flip or 1s elapses.
     let deadline = started + Duration::from_secs(1);
     let mut observed = before.captcha_enabled;
     while Instant::now() < deadline {

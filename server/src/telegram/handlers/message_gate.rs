@@ -287,9 +287,15 @@ async fn log_allowed_message(
     chat_id: i64,
     user_id: i64,
 ) -> anyhow::Result<()> {
+    use crate::services::chat_config_service::ChatConfigError;
+    // Only the "row doesn't exist" branch falls back to false. Surfacing a
+    // DB / Moka outage as `enabled = false` would silently disable allowed-
+    // message logging during the outage, which the caller's anyhow chain is
+    // meant to flag and retry-handle.
     let enabled = match state.chat_config.get(chat_id).await {
         Ok(c) => c.log_allowed_messages,
-        Err(_) => false,
+        Err(ChatConfigError::NotFound(_)) => false,
+        Err(e) => return Err(anyhow::Error::new(e).context("chat_config (log_allowed_messages)")),
     };
     if !enabled {
         return Ok(());
